@@ -1,0 +1,31 @@
+services:
+  signal-cli-rest-api:
+    # Built from signal-bridge.Dockerfile to pin signal-cli 0.14.4.1 (the published
+    # image still ships 0.14.3, which has a receive bug for new contacts).
+    build:
+      context: .
+      dockerfile: signal-bridge.Dockerfile
+    image: signal-chatbot-signal-bridge
+    environment:
+      # json-rpc mode keeps a persistent connection and serves the receive websocket.
+      MODE: json-rpc
+    volumes:
+      - ./signal-cli-config:/home/.local/share/signal-cli
+    ports:
+      # Exposed only for one-time registration from your machine; safe to remove afterwards.
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+
+  bot:
+    build: .
+    depends_on:
+      - signal-cli-rest-api
+    env_file:
+      - .env
+    environment:
+      # Reach the bridge over the compose network, not localhost.
+      SIGNAL_API_URL: http://signal-cli-rest-api:8080
+    volumes:
+      - ./data:/app/data
+      - ./prompts:/app/prompts:ro
+    restart: unless-stopped

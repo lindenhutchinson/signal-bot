@@ -1,0 +1,103 @@
+"""The orchestrator: wires transport, history, and the LLM into the bot loop.
+
+For every incoming group message it (1) enforces the allowlist, (2) records the
+message as context, and (3) if the trigger alias is present, generates and sends
+a reply. A per-group lock serialises overlapping triggers so replies for one
+group are produced in order.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections import defaultdict
+from typing import Protocol
+
+from signal_chatbot.history import HistoryStore
+from signal_chatbot.llm.prompt import BOT_SENDER, build_messages
+from signal_chatbot.logging import get_logger
+from signal_chatbot.transport.models import IncomingMessage, OutgoingMessage
+
+log = get_logger(__name__)
+
+
+class Responder(Protocol):
+    """The LLM-facing dependency the bot needs (satisfied by Conversation)."""
+
+    async def respond(self, messages: list[dict]) -> str: ...
+
+
+class Sender(Protocol):
+    """The transport-facing dependency the bot needs (satisfied by SignalClient)."""
+
+    async def send(self, message: OutgoingMessage) -> None: ...
+
+
+class Stream(Sender, Protocol):
+    def stream(self): ...
+
+
+class Bot:
+    """Coordinates incoming messages, history, and LLM replies."""
+
+    def __init__(
+        self,
+        *,
+        signal: Sender,
+        history: HistoryStore,
+        conversation: Responder,
+        system_prompt: str,
+        allowed_group_ids: list[str],
+        allowed_senders: list[str],
+        trigger_alias: str,
+        error_reply: str,
+    ):
+        self._signal = signal
+        self._history = history
+        self._conversation = conversation
+        self._system_prompt = system_prompt
+        self._allowed_groups = set(allowed_group_ids)
+        self._allowed_senders = set(allowed_senders)
+        self._trigger = trigger_alias.lower()
+        self._error_reply = error_reply
+        self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+
+    async def run(self) -> None:
+        """Consume the Signal stream forever."""
+        async for message in self._signal.stream():  # type: ignore[attr-defined]
+            await self.handle(message)
+
+    async def handle(self, message: IncomingMessage) -> None:
+        """Process a single incoming message."""
+        if not self._is_allowed(message):
+            return
+
+        await self._history.append(
+            message.group_id,
+            sender=message.sender_name,
+            text=message.text,
+            timestamp=message.timestamp,
+        )
+
+        if self._trigger not in message.text.lower():
+            return
+
+        async with self._locks[message.group_id]:
+            await self._reply(message.group_id, message.timestamp)
+
+    def _is_allowed(self, message: IncomingMessage) -> bool:
+        if message.group_id not in self._allowed_groups:
+            return False
+        return not self._allowed_senders or message.sender_number in self._allowed_senders
+
+    async def _reply(self, group_id: str, timestamp: int) -> None:
+        try:
+            history = await self._history.recent(group_id)
+            messages = build_messages(self._system_prompt, history)
+            answer = (await self._conversation.respond(messages)).strip()
+        except Exception as exc:  # noqa: BLE001 - never let one message kill the loop
+            log.error("bot.reply_failed", group=group_id, error=str(exc))
+            answer = ""
+
+        reply = answer or self._error_reply
+        await self._signal.send(OutgoingMessage(group_id=group_id, text=reply))
+        await self._history.append(group_id, sender=BOT_SENDER, text=reply, timestamp=timestamp)

@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Environment / secrets
+.env
+
+# Runtime data
+data/
+*.sqlite
+*.sqlite3
+*.db
+
+# signal-cli-rest-api registration volume (account keys, history, quarantined data)
+signal-cli-config/
+
+# Vendored signal-cli snapshot tarball — large build artifact for the temporary
+# 0.14.5-SNAPSHOT pin (see README "signal-cli version pin"). Fetched, not committed.
+vendor/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
