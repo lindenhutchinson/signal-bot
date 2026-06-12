@@ -28,11 +28,16 @@ def test_format_farewell_matches_required_shape() -> None:
     )
 
 
+def test_format_name_set() -> None:
+    assert replies.format_name_set("Greg") == "Name changed to 'Greg'."
+
+
 def test_help_text_lists_every_command() -> None:
     for token in (
         "@patch",
         "@rule",
         "@lore",
+        "@name",
         "@patchlist",
         "@rulelist",
         "@lorelist",

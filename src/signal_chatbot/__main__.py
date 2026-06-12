@@ -42,13 +42,14 @@ async def _run() -> None:
     )
     conversation = Conversation(
         llm,
-        ToolRegistry(default_tools()),
+        ToolRegistry(default_tools(signal)),
         max_iterations=settings.max_tool_iterations,
     )
     commands = CommandRouter(
         state=state,
         history=history,
         farewell=LlmFarewellWriter(llm, max_chars=settings.reset_farewell_max_chars),
+        name_setter=signal,
     )
     bot = Bot(
         signal=signal,

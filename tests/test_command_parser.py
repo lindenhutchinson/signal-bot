@@ -5,6 +5,10 @@ def test_parses_command_with_argument() -> None:
     assert parse("@patch no more puns") == Command(CommandName.PATCH, "no more puns")
 
 
+def test_parses_name_command() -> None:
+    assert parse("@name Greg") == Command(CommandName.NAME, "Greg")
+
+
 def test_command_word_is_case_insensitive() -> None:
     assert parse("@RESET") == Command(CommandName.RESET, "")
 

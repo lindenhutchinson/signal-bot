@@ -92,7 +92,11 @@ class Bot:
 
         command = parse(message.text)
         if command is not None:
-            reply = await self._commands.handle(command, message)
+            try:
+                reply = await self._commands.handle(command, message)
+            except Exception as exc:  # noqa: BLE001 - a bad command must not kill the loop
+                log.error("bot.command_failed", group=message.group_id, error=str(exc))
+                reply = self._error_reply
             await self._signal.send(OutgoingMessage(group_id=message.group_id, text=reply))
             return
 

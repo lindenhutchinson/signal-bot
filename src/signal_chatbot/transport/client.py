@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from typing import Protocol
 
 import httpx
 import websockets
@@ -21,6 +22,12 @@ from signal_chatbot.transport.models import IncomingMessage, OutgoingMessage
 log = get_logger(__name__)
 
 _MAX_BACKOFF_SECONDS = 30.0
+
+
+class ProfileNameSetter(Protocol):
+    """Something that can change the bot's own Signal display name (satisfied by SignalClient)."""
+
+    async def set_profile_name(self, name: str) -> None: ...
 
 
 class SignalClient:
@@ -75,6 +82,14 @@ class SignalClient:
                 "message": message.text,
                 "recipients": [message.group_id],
             },
+        )
+        resp.raise_for_status()
+
+    async def set_profile_name(self, name: str) -> None:
+        """Set the bot's own Signal profile (display) name. This is account-global."""
+        resp = await self._http.put(
+            f"/v1/profiles/{self._bot_number}",
+            json={"name": name},
         )
         resp.raise_for_status()
 

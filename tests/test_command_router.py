@@ -27,6 +27,17 @@ class FakeFarewellWriter:
         return self.result
 
 
+class FakeNameSetter:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.names: list[str] = []
+        self.error = error
+
+    async def set_profile_name(self, name: str) -> None:
+        if self.error is not None:
+            raise self.error
+        self.names.append(name)
+
+
 @pytest.fixture
 async def stores(tmp_path: Path):
     state = StateStore(tmp_path / "state.sqlite", command_log_window=40)
@@ -38,9 +49,12 @@ async def stores(tmp_path: Path):
     await history.aclose()
 
 
-def router(state, history, *, farewell=None) -> CommandRouter:
+def router(state, history, *, farewell=None, name_setter=None) -> CommandRouter:
     return CommandRouter(
-        state=state, history=history, farewell=farewell or FakeFarewellWriter(None)
+        state=state,
+        history=history,
+        farewell=farewell or FakeFarewellWriter(None),
+        name_setter=name_setter or FakeNameSetter(),
     )
 
 
@@ -112,7 +126,8 @@ async def test_reset_with_farewell_wipes_seeds_lore_and_announces(stores) -> Non
         GROUP, kind="rule", author_name="A", author_number="+1", text="old rule", created_at=1
     )
     farewell = FakeFarewellWriter(Farewell(name="Greg", final_message="Beware Dave."))
-    r = router(state, history, farewell=farewell)
+    name_setter = FakeNameSetter()
+    r = router(state, history, farewell=farewell, name_setter=name_setter)
 
     out = await _run(r, "@reset")
 
@@ -123,6 +138,43 @@ async def test_reset_with_farewell_wipes_seeds_lore_and_announces(stores) -> Non
         ("Beware Dave.", "Greg", "bot")
     ]
     assert [c.command for c in await state.recent_commands(GROUP)] == ["@reset"]
+    assert name_setter.names == ["Greg"]  # reset renames the bot to its new self
+
+
+async def test_reset_rename_failure_does_not_abort_the_reset(stores) -> None:
+    state, history = stores
+    await state.add_directive(
+        GROUP, kind="rule", author_name="A", author_number="+1", text="old rule", created_at=1
+    )
+    farewell = FakeFarewellWriter(Farewell(name="Greg", final_message="Beware Dave."))
+    name_setter = FakeNameSetter(error=RuntimeError("bridge down"))
+    r = router(state, history, farewell=farewell, name_setter=name_setter)
+
+    out = await _run(r, "@reset")
+
+    assert out == "Final message from Greg:\nBeware Dave."  # farewell still completes
+    directives = await state.directives(GROUP)
+    assert [d.text for d in directives.lore] == ["Beware Dave."]  # lore still seeded
+
+
+async def test_name_sets_display_name_logs_and_confirms(stores) -> None:
+    state, history = stores
+    name_setter = FakeNameSetter()
+    r = router(state, history, name_setter=name_setter)
+
+    assert await _run(r, "@name Greg") == replies.format_name_set("Greg")
+    assert name_setter.names == ["Greg"]
+    assert [c.command for c in await state.recent_commands(GROUP)] == ["@name"]
+
+
+async def test_empty_name_returns_usage_and_does_not_log(stores) -> None:
+    state, history = stores
+    name_setter = FakeNameSetter()
+    r = router(state, history, name_setter=name_setter)
+
+    assert await _run(r, "@name") == replies.USAGE_NAME
+    assert name_setter.names == []
+    assert await state.recent_commands(GROUP) == []
 
 
 async def test_reset_without_usable_farewell_wipes_cleanly(stores) -> None:

@@ -16,12 +16,14 @@ RESET_CLEAN = "Reset — everything's gone. Starting over."
 USAGE_PATCH = "Usage: @patch <text> — adds a general directive."
 USAGE_RULE = "Usage: @rule <text> — adds a hard rule the bot must follow."
 USAGE_LORE = "Usage: @lore <text> — adds a fact the bot treats as true."
+USAGE_NAME = "Usage: @name <text> — sets the bot's Signal display name."
 
 HELP_TEXT = (
     "Commands (anyone can run these):\n"
     "  @patch <text>   Add a general directive the bot follows.\n"
     "  @rule <text>    Add a hard rule the bot must obey.\n"
     "  @lore <text>    Add a fact/story the bot treats as true.\n"
+    "  @name <text>    Rename the bot (its Signal display name, account-global).\n"
     "  @patchlist      List active patches (who added them, when).\n"
     "  @rulelist       List active rules.\n"
     "  @lorelist       List active lore.\n"
@@ -44,3 +46,8 @@ def format_list(title: str, directives: Sequence[Directive]) -> str:
 def format_farewell(name: str, final_message: str) -> str:
     """The message the group sees when the bot is reset."""
     return f"Final message from {name}:\n{final_message}"
+
+
+def format_name_set(name: str) -> str:
+    """Confirmation that the bot's display name changed."""
+    return f"Name changed to {name!r}."

@@ -47,12 +47,15 @@ class FakeConversation:
 
 
 class FakeCommands:
-    def __init__(self, reply: str = "ok") -> None:
+    def __init__(self, reply: str = "ok", error: Exception | None = None) -> None:
         self.reply = reply
+        self.error = error
         self.handled: list[Command] = []
 
     async def handle(self, command: Command, message) -> str:
         self.handled.append(command)
+        if self.error is not None:
+            raise self.error
         return self.reply
 
 
@@ -168,6 +171,16 @@ async def test_command_is_intercepted_replied_and_kept_out_of_history(history) -
     assert signal.sent[0].text == "Patched. 🩹"
     assert convo.seen == []  # LLM never called
     assert await history.recent(GROUP) == []  # command not stored as conversation
+
+
+async def test_failing_command_sends_fallback_and_does_not_raise(history) -> None:
+    signal, convo = FakeSignal(), FakeConversation()
+    commands = FakeCommands(error=RuntimeError("boom"))
+    bot = make_bot(history, signal, convo, commands=commands)
+
+    await bot.handle(message("@patch x"))
+
+    assert signal.sent[0].text == "oops"
 
 
 async def test_command_from_disallowed_group_is_ignored(history) -> None:

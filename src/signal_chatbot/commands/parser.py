@@ -16,6 +16,7 @@ class CommandName(StrEnum):
     PATCH = "patch"
     RULE = "rule"
     LORE = "lore"
+    NAME = "name"
     PATCHLIST = "patchlist"
     RULELIST = "rulelist"
     LORELIST = "lorelist"
