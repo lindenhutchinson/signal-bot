@@ -194,17 +194,15 @@ class StateStore:
         await self._conn.commit()
 
     async def recent_disclaimers(self, group_id: str) -> list[Disclaimer]:
-        """Return the newest ``command_log_window`` disclaimers, oldest-first."""
+        """Return the newest ``command_log_window`` disclaimers, newest-first.
+
+        The window keeps the most recent entries (older ones fall off, not newer
+        ones) and they come back newest-first so ``@disclaimers`` shows the latest
+        at the top.
+        """
         cursor = await self._conn.execute(
-            """
-            SELECT message, disclaimer, created_at FROM (
-                SELECT id, message, disclaimer, created_at
-                FROM disclaimers
-                WHERE group_id = ?
-                ORDER BY id DESC
-                LIMIT ?
-            ) ORDER BY id ASC
-            """,
+            "SELECT message, disclaimer, created_at FROM disclaimers"
+            " WHERE group_id = ? ORDER BY id DESC LIMIT ?",
             (group_id, self._window),
         )
         rows = await cursor.fetchall()

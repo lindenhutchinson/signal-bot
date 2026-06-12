@@ -11,6 +11,14 @@ from signal_chatbot.tools import ToolRegistry
 
 log = get_logger(__name__)
 
+# Force DeepSeek's strict JSON Output on every completion so the final answer is
+# always a parseable ``{"message", "ethical_disclaimer"}`` object. Tool calls still
+# work under this mode (the model returns tool_calls with empty content); the JSON
+# constraint only binds the final textual answer. DeepSeek requires the literal word
+# "json" plus an example in the prompt to honour this — both live in prompt.py's
+# output contract.
+_JSON_OBJECT = {"type": "json_object"}
+
 
 @dataclass(frozen=True, slots=True)
 class BotReply:
@@ -82,7 +90,9 @@ class Conversation:
         tool_defs = self._tools.definitions() or None
 
         for _ in range(self._max_iterations):
-            completion = await self._client.complete(working, tools=tool_defs)
+            completion = await self._client.complete(
+                working, tools=tool_defs, response_format=_JSON_OBJECT
+            )
             self._log_cache_usage(completion)
             choice = completion.choices[0].message
 
@@ -94,7 +104,7 @@ class Conversation:
                 working.append(await self._run_tool(call))
 
         # Tool budget exhausted: force a tool-free completion so the user gets a reply.
-        completion = await self._client.complete(working, tools=None)
+        completion = await self._client.complete(working, tools=None, response_format=_JSON_OBJECT)
         self._log_cache_usage(completion)
         return _parse_reply(completion.choices[0].message.content or "")
 

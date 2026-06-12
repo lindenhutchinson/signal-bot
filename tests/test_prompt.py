@@ -67,7 +67,7 @@ def test_human_messages_are_user_role_labelled_by_sender_and_timestamped() -> No
     assert messages[1] == {"role": "user", "content": "[2026-06-12 14:32] Alice: hello"}
 
 
-def test_bot_messages_map_to_assistant_role_with_timestamp_and_no_label() -> None:
+def test_bot_messages_map_to_assistant_role_unstamped_and_unlabelled() -> None:
     history = [
         StoredMessage(sender="Alice", text="hi @bot", timestamp=1781274720000),
         StoredMessage(sender=BOT_SENDER, text="Hello Alice!", timestamp=1781274720000),
@@ -75,5 +75,7 @@ def test_bot_messages_map_to_assistant_role_with_timestamp_and_no_label() -> Non
 
     messages = build_messages("sys", history)
 
+    # User turns keep the [timestamp] for context; the bot's own turns are replayed
+    # exactly as sent (no stamp) so it doesn't learn to echo the date into its replies.
     assert messages[1] == {"role": "user", "content": "[2026-06-12 14:32] Alice: hi @bot"}
-    assert messages[2] == {"role": "assistant", "content": "[2026-06-12 14:32] Hello Alice!"}
+    assert messages[2] == {"role": "assistant", "content": "Hello Alice!"}

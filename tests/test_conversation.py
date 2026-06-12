@@ -38,8 +38,8 @@ class FakeClient:
         self._queue = list(completions)
         self.calls = []
 
-    async def complete(self, messages, tools=None):
-        self.calls.append((list(messages), tools))
+    async def complete(self, messages, tools=None, response_format=None):
+        self.calls.append((list(messages), tools, response_format))
         return self._queue.pop(0)
 
 
@@ -109,3 +109,21 @@ async def test_forces_final_answer_when_iterations_exhausted() -> None:
     assert answer.message == "forced final"
     # last call disables tools to force a textual answer
     assert client.calls[-1][1] is None
+
+
+async def test_every_completion_requests_strict_json_output() -> None:
+    client = FakeClient(
+        [
+            _completion(_message(tool_calls=[_tool_call("c1", "echo", {"text": "yo"})])),
+            _completion(_message(content='{"message": "done", "ethical_disclaimer": ""}')),
+        ]
+    )
+    convo = Conversation(client, ToolRegistry([Echo()]), max_iterations=3)
+
+    await convo.respond([{"role": "user", "content": "use echo"}])
+
+    # both the tool-calling turn and the final answer must request JSON output
+    assert [response_format for _, _, response_format in client.calls] == [
+        {"type": "json_object"},
+        {"type": "json_object"},
+    ]
