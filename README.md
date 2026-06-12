@@ -288,6 +288,17 @@ The `Args` model both validates the model's arguments and generates the JSON
 schema advertised to DeepSeek, so the two can't drift. Errors raised inside
 `run` are caught and reported back to the model rather than crashing the bot.
 
+### Built-in tools
+- **`current_time`** — current date/time in any IANA timezone.
+- **`set_name`** — the bot renames its own Signal display name.
+- **`wikipedia_search` / `wikipedia_article`** — look up Wikipedia to
+  fact-check and answer questions about current events. Search finds the right
+  article; the article tool returns the intro by default, a table of contents
+  with `full=true`, or a named/numbered section on request. Results are cached
+  in SQLite with a TTL (`WIKIPEDIA_CACHE_TTL_SECONDS`, default 6h), so repeat
+  lookups don't re-hit the Wikimedia API. Set `WIKIPEDIA_USER_AGENT` to a
+  descriptive value with contact info — Wikimedia may block generic agents.
+
 ## Cost & caching
 
 Running cost is the droplet (~$6/mo) plus DeepSeek usage. The prompt is ordered

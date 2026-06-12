@@ -44,6 +44,15 @@ class Settings(BaseSettings):
     reset_farewell_max_chars: int = 200
     default_display_name: str = "bot"
 
+    # Wikipedia lookup
+    wikipedia_language: str = "en"
+    wikipedia_cache_ttl_seconds: int = 21600  # 6h
+    wikipedia_search_limit: int = 5
+    wikipedia_max_section_chars: int = 2000
+    wikipedia_user_agent: str = (
+        "signal-chatbot/0.1 (https://github.com/; contact via repository)"
+    )
+
     @field_validator("allowed_group_ids", "allowed_senders", mode="before")
     @classmethod
     def _split_csv(cls, value: object) -> object:

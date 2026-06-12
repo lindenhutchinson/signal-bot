@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 
+import httpx
+
 from signal_chatbot.bot import Bot
 from signal_chatbot.commands.farewell import LlmFarewellWriter
 from signal_chatbot.commands.router import CommandRouter
@@ -20,6 +22,11 @@ from signal_chatbot.logging import configure_logging, get_logger
 from signal_chatbot.state import StateStore
 from signal_chatbot.tools import ToolRegistry
 from signal_chatbot.tools.builtin import default_tools
+from signal_chatbot.tools.builtin.wikipedia import (
+    WikipediaCache,
+    WikipediaClient,
+    WikipediaService,
+)
 from signal_chatbot.transport import SignalClient
 
 log = get_logger(__name__)
@@ -40,9 +47,28 @@ async def _run() -> None:
         model=settings.deepseek_model,
         base_url=settings.deepseek_base_url,
     )
+    wikipedia_http = httpx.AsyncClient(
+        timeout=30.0,
+        headers={"User-Agent": settings.wikipedia_user_agent},
+    )
+    wikipedia_cache = WikipediaCache(settings.database_path)
+    await wikipedia_cache.connect()
+    wikipedia = WikipediaService(
+        WikipediaClient(wikipedia_http, language=settings.wikipedia_language),
+        wikipedia_cache,
+        language=settings.wikipedia_language,
+        ttl_seconds=settings.wikipedia_cache_ttl_seconds,
+        search_limit=settings.wikipedia_search_limit,
+    )
     conversation = Conversation(
         llm,
-        ToolRegistry(default_tools(signal)),
+        ToolRegistry(
+            default_tools(
+                signal,
+                wikipedia,
+                wikipedia_max_section_chars=settings.wikipedia_max_section_chars,
+            )
+        ),
         max_iterations=settings.max_tool_iterations,
     )
     commands = CommandRouter(
@@ -79,6 +105,8 @@ async def _run() -> None:
         await llm.aclose()
         await history.aclose()
         await state.aclose()
+        await wikipedia_cache.aclose()
+        await wikipedia_http.aclose()
 
 
 async def _list_groups() -> None:
