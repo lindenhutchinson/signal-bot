@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from signal_chatbot.state import Directive
+from signal_chatbot.state import Directive, Disclaimer
 from signal_chatbot.timefmt import format_timestamp
+
+_EXCERPT_LEN = 40
 
 PATCHED = "Patched. 🩹"
 RULE_LOGGED = "Rule logged. ⚖️"
@@ -27,6 +29,7 @@ HELP_TEXT = (
     "  @patchlist      List active patches (who added them, when).\n"
     "  @rulelist       List active rules.\n"
     "  @lorelist       List active lore.\n"
+    "  @disclaimers    Show the asides the bot attached to its messages.\n"
     "  @reset          Wipe all patches, rules & lore. The bot leaves a parting note.\n"
     "  @clear          Wipe chat history; the bot windows fresh from here.\n"
     "  @help           Show this message."
@@ -51,3 +54,18 @@ def format_farewell(name: str, final_message: str) -> str:
 def format_name_set(name: str) -> str:
     """Confirmation that the bot's display name changed."""
     return f"Name changed to {name!r}."
+
+
+def format_disclaimers(disclaimers: Sequence[Disclaimer]) -> str:
+    """Render the logged asides with the message each one accompanied."""
+    if not disclaimers:
+        return "No disclaimers yet."
+    lines = ["Disclaimers:"]
+    for i, d in enumerate(disclaimers, 1):
+        when = format_timestamp(d.created_at)
+        lines.append(f'{i}. [{when}] "{d.disclaimer}" — re: "{_excerpt(d.message)}"')
+    return "\n".join(lines)
+
+
+def _excerpt(text: str) -> str:
+    return text if len(text) <= _EXCERPT_LEN else text[: _EXCERPT_LEN - 1].rstrip() + "…"

@@ -33,9 +33,11 @@ Commands must be the **start** of the message; the `@bot` trigger is unaffected.
 @patch <text>   Add a general directive the bot follows.
 @rule <text>    Add a hard rule the bot must obey.
 @lore <text>    Add a fact/story the bot treats as true.
+@name <text>    Rename the bot (its Signal display name, account-global).
 @patchlist      List active patches (who added them, when).
 @rulelist       List active rules.
 @lorelist       List active lore.
+@disclaimers    Show the asides the bot attached to its messages.
 @reset          Wipe all patches, rules & lore. The bot leaves a parting note.
 @clear          Wipe chat history; the bot windows fresh from here.
 @help           Show this message.
@@ -51,6 +53,24 @@ Commands must be the **start** of the message; the `@bot` trigger is unaffected.
 - A contentless **command-activity log** (who ran what command, when — never the
   arguments) is also injected into the prompt, giving the bot a sense of how its
   state has been churning without exposing the contents.
+- The bot can **rename itself** mid-conversation via a `set_name` tool, and `@reset`
+  renames it to the new generation's chosen name.
+
+## Replies, disclaimers & timestamps
+
+The bot answers with a structured object `{message, ethical_disclaimer}`:
+
+- **`message`** is the only thing sent to Signal.
+- **`ethical_disclaimer`** is *never* sent — it's logged locally and viewable with
+  `@disclaimers`. The bot is told this field is shown to everyone, so it parks
+  "it's a joke / satire / I don't mean it" notes there instead of hedging the
+  message itself. (A separate highlighted channel for surfacing these to humans is
+  not built yet; today they live in `@disclaimers`.)
+- Conversation history is shown to the bot with per-message **timestamps**, so it
+  has temporal awareness of who said what, when.
+
+Parsing is defensive: if the model returns plain text instead of JSON, the whole
+reply is treated as `message` with no disclaimer.
 
 ## Project layout
 

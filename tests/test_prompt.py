@@ -44,31 +44,36 @@ def test_command_activity_renders_without_arguments() -> None:
     assert "Bob · @reset · 2026-06-12 14:32" in system
 
 
-def test_no_directives_or_log_leaves_base_prompt_unchanged() -> None:
-    assert build_messages("BASE", [])[0]["content"] == "BASE"
+def test_base_prompt_is_followed_by_the_output_format_contract() -> None:
+    system = build_messages("BASE", [])[0]["content"]
+
+    assert system.startswith("BASE")
+    assert "## How you must reply" in system
+    assert '"ethical_disclaimer"' in system
 
 
-def test_system_prompt_is_the_stable_first_message() -> None:
+def test_system_message_is_first_and_starts_with_the_base_prompt() -> None:
     messages = build_messages("You are Bot.", [])
 
-    assert messages[0] == {"role": "system", "content": "You are Bot."}
+    assert messages[0]["role"] == "system"
+    assert messages[0]["content"].startswith("You are Bot.")
 
 
-def test_human_messages_are_user_role_and_labelled_by_sender() -> None:
-    history = [StoredMessage(sender="Alice", text="hello", timestamp=1)]
+def test_human_messages_are_user_role_labelled_by_sender_and_timestamped() -> None:
+    history = [StoredMessage(sender="Alice", text="hello", timestamp=1781274720000)]
 
     messages = build_messages("sys", history)
 
-    assert messages[1] == {"role": "user", "content": "Alice: hello"}
+    assert messages[1] == {"role": "user", "content": "[2026-06-12 14:32] Alice: hello"}
 
 
-def test_bot_messages_map_to_assistant_role_without_label() -> None:
+def test_bot_messages_map_to_assistant_role_with_timestamp_and_no_label() -> None:
     history = [
-        StoredMessage(sender="Alice", text="hi @bot", timestamp=1),
-        StoredMessage(sender=BOT_SENDER, text="Hello Alice!", timestamp=2),
+        StoredMessage(sender="Alice", text="hi @bot", timestamp=1781274720000),
+        StoredMessage(sender=BOT_SENDER, text="Hello Alice!", timestamp=1781274720000),
     ]
 
     messages = build_messages("sys", history)
 
-    assert messages[1]["role"] == "user"
-    assert messages[2] == {"role": "assistant", "content": "Hello Alice!"}
+    assert messages[1] == {"role": "user", "content": "[2026-06-12 14:32] Alice: hi @bot"}
+    assert messages[2] == {"role": "assistant", "content": "[2026-06-12 14:32] Hello Alice!"}

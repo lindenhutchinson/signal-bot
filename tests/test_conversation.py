@@ -43,13 +43,35 @@ class FakeClient:
         return self._queue.pop(0)
 
 
-async def test_returns_content_when_no_tool_calls() -> None:
+async def test_plain_text_content_falls_back_to_message() -> None:
     client = FakeClient([_completion(_message(content="hi there"))])
     convo = Conversation(client, ToolRegistry(), max_iterations=3)
 
-    answer = await convo.respond([{"role": "user", "content": "hello"}])
+    reply = await convo.respond([{"role": "user", "content": "hello"}])
 
-    assert answer == "hi there"
+    assert reply.message == "hi there"
+    assert reply.ethical_disclaimer == ""
+
+
+async def test_json_content_is_parsed_into_message_and_disclaimer() -> None:
+    content = '{"message": "you are all doomed", "ethical_disclaimer": "kidding, love you"}'
+    client = FakeClient([_completion(_message(content=content))])
+    convo = Conversation(client, ToolRegistry(), max_iterations=3)
+
+    reply = await convo.respond([{"role": "user", "content": "hello"}])
+
+    assert reply.message == "you are all doomed"
+    assert reply.ethical_disclaimer == "kidding, love you"
+
+
+async def test_json_content_in_a_code_fence_is_parsed() -> None:
+    content = '```json\n{"message": "hi", "ethical_disclaimer": ""}\n```'
+    client = FakeClient([_completion(_message(content=content))])
+    convo = Conversation(client, ToolRegistry(), max_iterations=3)
+
+    reply = await convo.respond([{"role": "user", "content": "hello"}])
+
+    assert reply.message == "hi"
 
 
 async def test_executes_tool_then_returns_final_answer() -> None:
@@ -63,7 +85,7 @@ async def test_executes_tool_then_returns_final_answer() -> None:
 
     answer = await convo.respond([{"role": "user", "content": "use echo"}])
 
-    assert answer == "done"
+    assert answer.message == "done"
     # second call must include the tool result fed back to the model
     second_call_messages = client.calls[1][0]
     tool_msg = second_call_messages[-1]
@@ -84,6 +106,6 @@ async def test_forces_final_answer_when_iterations_exhausted() -> None:
 
     answer = await convo.respond([{"role": "user", "content": "loop"}])
 
-    assert answer == "forced final"
+    assert answer.message == "forced final"
     # last call disables tools to force a textual answer
     assert client.calls[-1][1] is None

@@ -45,6 +45,15 @@ class LoggedCommand:
     created_at: int
 
 
+@dataclass(frozen=True, slots=True)
+class Disclaimer:
+    """An aside the bot attached to a reply — logged, never sent to Signal."""
+
+    message: str
+    disclaimer: str
+    created_at: int
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS directives (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,6 +74,15 @@ CREATE TABLE IF NOT EXISTS command_log (
     created_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_command_log_group ON command_log (group_id, id);
+
+CREATE TABLE IF NOT EXISTS disclaimers (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id   TEXT    NOT NULL,
+    message    TEXT    NOT NULL,
+    disclaimer TEXT    NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_disclaimers_group ON disclaimers (group_id, id);
 """
 
 
@@ -163,6 +181,34 @@ class StateStore:
         )
         rows = await cursor.fetchall()
         return [LoggedCommand(r["author_name"], r["command"], r["created_at"]) for r in rows]
+
+    async def add_disclaimer(
+        self, group_id: str, *, message: str, disclaimer: str, created_at: int
+    ) -> None:
+        """Record an aside the bot attached to a reply (never sent to Signal)."""
+        await self._conn.execute(
+            "INSERT INTO disclaimers (group_id, message, disclaimer, created_at)"
+            " VALUES (?, ?, ?, ?)",
+            (group_id, message, disclaimer, created_at),
+        )
+        await self._conn.commit()
+
+    async def recent_disclaimers(self, group_id: str) -> list[Disclaimer]:
+        """Return the newest ``command_log_window`` disclaimers, oldest-first."""
+        cursor = await self._conn.execute(
+            """
+            SELECT message, disclaimer, created_at FROM (
+                SELECT id, message, disclaimer, created_at
+                FROM disclaimers
+                WHERE group_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+            ) ORDER BY id ASC
+            """,
+            (group_id, self._window),
+        )
+        rows = await cursor.fetchall()
+        return [Disclaimer(r["message"], r["disclaimer"], r["created_at"]) for r in rows]
 
     async def aclose(self) -> None:
         if self._db is not None:

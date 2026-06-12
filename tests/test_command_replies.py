@@ -1,5 +1,5 @@
 from signal_chatbot.commands import replies
-from signal_chatbot.state import Directive
+from signal_chatbot.state import Directive, Disclaimer
 
 
 def _directive(text: str, *, created_at: int = 1781274720000) -> Directive:
@@ -32,6 +32,20 @@ def test_format_name_set() -> None:
     assert replies.format_name_set("Greg") == "Name changed to 'Greg'."
 
 
+def test_format_disclaimers_lists_aside_and_message_excerpt() -> None:
+    disclaimers = [
+        Disclaimer(message="you are doomed", disclaimer="kidding", created_at=1781274720000)
+    ]
+
+    out = replies.format_disclaimers(disclaimers)
+
+    assert out == 'Disclaimers:\n1. [2026-06-12 14:32] "kidding" — re: "you are doomed"'
+
+
+def test_format_disclaimers_empty() -> None:
+    assert replies.format_disclaimers([]) == "No disclaimers yet."
+
+
 def test_help_text_lists_every_command() -> None:
     for token in (
         "@patch",
@@ -41,6 +55,7 @@ def test_help_text_lists_every_command() -> None:
         "@patchlist",
         "@rulelist",
         "@lorelist",
+        "@disclaimers",
         "@reset",
         "@clear",
         "@help",

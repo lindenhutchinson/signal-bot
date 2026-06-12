@@ -20,6 +20,24 @@ from signal_chatbot.timefmt import format_timestamp
 # be replayed as assistant turns on subsequent calls.
 BOT_SENDER = "__bot__"
 
+# Always-present output contract. Lives here (not in the editable identity prompt)
+# so it survives persona edits. The "shown to humans" line is deliberate: the
+# disclaimer is actually only logged + viewable via @disclaimers, but telling the
+# bot it reaches people is what gets it to vent caveats there instead of hedging
+# the message.
+_OUTPUT_FORMAT = (
+    "## How you must reply\n"
+    "Reply with a single JSON object and nothing else:\n"
+    '{"message": "<what the group sees>", "ethical_disclaimer": "<optional aside>"}\n'
+    '- "message" is the ONLY thing sent to the Signal chat. Write just your words — '
+    "no name prefix, no timestamp; those are added automatically.\n"
+    '- "ethical_disclaimer" is shown to every human in the chat in a separate, '
+    'highlighted channel — they always see it. Leave it "" unless you want them to '
+    "know something about the message: that it's a joke, satire, hyperbole, or that you "
+    'don\'t actually mean it. Say what you really think in "message" and put the wink in '
+    '"ethical_disclaimer".'
+)
+
 _RULES_HEADER = "## Rules — you MUST follow these. When two conflict, the LOWER one wins."
 _LORE_HEADER = "## Lore — treat every line as true."
 _PATCHES_HEADER = "## Patches — directives to follow. When two conflict, the LOWER one wins."
@@ -48,17 +66,18 @@ def build_messages(
         {"role": "system", "content": _render_system(system_prompt, directives, command_log)}
     ]
     for item in history:
+        stamp = format_timestamp(item.timestamp)
         if item.sender == BOT_SENDER:
-            messages.append({"role": "assistant", "content": item.text})
+            messages.append({"role": "assistant", "content": f"[{stamp}] {item.text}"})
         else:
-            messages.append({"role": "user", "content": f"{item.sender}: {item.text}"})
+            messages.append({"role": "user", "content": f"[{stamp}] {item.sender}: {item.text}"})
     return messages
 
 
 def _render_system(
     base: str, directives: DirectiveSet | None, command_log: list[LoggedCommand] | None
 ) -> str:
-    parts = [base]
+    parts = [base, _OUTPUT_FORMAT]
     if directives is not None:
         if directives.rules:
             parts.append(_RULES_HEADER + "\n" + _bullets(d.text for d in directives.rules))

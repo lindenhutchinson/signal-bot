@@ -20,6 +20,7 @@ class CommandName(StrEnum):
     PATCHLIST = "patchlist"
     RULELIST = "rulelist"
     LORELIST = "lorelist"
+    DISCLAIMERS = "disclaimers"
     RESET = "reset"
     CLEAR = "clear"
     HELP = "help"

@@ -62,6 +62,10 @@ class CommandRouter:
                 return replies.format_list(
                     "Lore", (await self._state.directives(message.group_id)).lore
                 )
+            case CommandName.DISCLAIMERS:
+                return replies.format_disclaimers(
+                    await self._state.recent_disclaimers(message.group_id)
+                )
             case CommandName.NAME:
                 return await self._name(message, command.arg.strip())
             case CommandName.CLEAR:

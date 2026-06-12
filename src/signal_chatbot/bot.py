@@ -14,6 +14,7 @@ from typing import Protocol
 
 from signal_chatbot.commands.parser import Command, parse
 from signal_chatbot.history import HistoryStore
+from signal_chatbot.llm.conversation import BotReply
 from signal_chatbot.llm.prompt import BOT_SENDER, build_messages
 from signal_chatbot.logging import get_logger
 from signal_chatbot.state import DirectiveSet, LoggedCommand
@@ -25,7 +26,7 @@ log = get_logger(__name__)
 class Responder(Protocol):
     """The LLM-facing dependency the bot needs (satisfied by Conversation)."""
 
-    async def respond(self, messages: list[dict]) -> str: ...
+    async def respond(self, messages: list[dict]) -> BotReply: ...
 
 
 class Sender(Protocol):
@@ -51,6 +52,14 @@ class StateReader(Protocol):
     async def recent_commands(self, group_id: str) -> list[LoggedCommand]: ...
 
 
+class DisclaimerLog(Protocol):
+    """Sink for the asides the bot attaches to replies (satisfied by StateStore)."""
+
+    async def add_disclaimer(
+        self, group_id: str, *, message: str, disclaimer: str, created_at: int
+    ) -> None: ...
+
+
 class Bot:
     """Coordinates incoming messages, history, and LLM replies."""
 
@@ -62,6 +71,7 @@ class Bot:
         conversation: Responder,
         commands: Commands,
         state: StateReader,
+        disclaimers: DisclaimerLog,
         system_prompt: str,
         allowed_group_ids: list[str],
         allowed_senders: list[str],
@@ -73,6 +83,7 @@ class Bot:
         self._conversation = conversation
         self._commands = commands
         self._state = state
+        self._disclaimers = disclaimers
         self._system_prompt = system_prompt
         self._allowed_groups = set(allowed_group_ids)
         self._allowed_senders = set(allowed_senders)
@@ -126,11 +137,15 @@ class Bot:
             messages = build_messages(
                 self._system_prompt, history, directives=directives, command_log=command_log
             )
-            answer = (await self._conversation.respond(messages)).strip()
+            reply = await self._conversation.respond(messages)
         except Exception as exc:  # noqa: BLE001 - never let one message kill the loop
             log.error("bot.reply_failed", group=group_id, error=str(exc))
-            answer = ""
+            reply = BotReply(message="")
 
-        reply = answer or self._error_reply
-        await self._signal.send(OutgoingMessage(group_id=group_id, text=reply))
-        await self._history.append(group_id, sender=BOT_SENDER, text=reply, timestamp=timestamp)
+        text = reply.message.strip() or self._error_reply
+        if reply.ethical_disclaimer:
+            await self._disclaimers.add_disclaimer(
+                group_id, message=text, disclaimer=reply.ethical_disclaimer, created_at=timestamp
+            )
+        await self._signal.send(OutgoingMessage(group_id=group_id, text=text))
+        await self._history.append(group_id, sender=BOT_SENDER, text=text, timestamp=timestamp)

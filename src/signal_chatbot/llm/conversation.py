@@ -1,14 +1,60 @@
-"""The tool-calling loop that turns a message list into a final text reply."""
+"""The tool-calling loop that turns a message list into a final structured reply."""
 
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from signal_chatbot.logging import get_logger
 from signal_chatbot.tools import ToolRegistry
 
 log = get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class BotReply:
+    """The model's structured answer: the public message plus an optional aside.
+
+    ``message`` is what gets sent to Signal. ``ethical_disclaimer`` is never sent —
+    it is logged locally (and viewable via ``@disclaimers``); the model is told it is
+    shown to humans, so it puts "it's a joke / satire / I don't mean it" notes there.
+    """
+
+    message: str
+    ethical_disclaimer: str = ""
+
+
+def _strip_code_fence(text: str) -> str:
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()[1:]
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def _clean(value: Any) -> str:
+    return "" if value is None else str(value).strip()
+
+
+def _parse_reply(content: str) -> BotReply:
+    """Parse the model's final content into a :class:`BotReply`.
+
+    Expects a JSON object ``{"message": ..., "ethical_disclaimer": ...}`` but falls
+    back to treating the whole content as the message if it isn't valid JSON.
+    """
+    text = _strip_code_fence(content.strip())
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return BotReply(message=content.strip())
+    if isinstance(data, dict) and "message" in data:
+        return BotReply(
+            message=_clean(data.get("message")),
+            ethical_disclaimer=_clean(data.get("ethical_disclaimer")),
+        )
+    return BotReply(message=content.strip())
 
 
 class CompletionClient(Protocol):
@@ -30,8 +76,8 @@ class Conversation:
         self._tools = tools
         self._max_iterations = max_iterations
 
-    async def respond(self, messages: list[dict]) -> str:
-        """Return the model's final text answer for ``messages``."""
+    async def respond(self, messages: list[dict]) -> BotReply:
+        """Return the model's final structured answer for ``messages``."""
         working = list(messages)
         tool_defs = self._tools.definitions() or None
 
@@ -41,7 +87,7 @@ class Conversation:
             choice = completion.choices[0].message
 
             if not choice.tool_calls:
-                return choice.content or ""
+                return _parse_reply(choice.content or "")
 
             working.append(self._assistant_turn(choice))
             for call in choice.tool_calls:
@@ -50,7 +96,7 @@ class Conversation:
         # Tool budget exhausted: force a tool-free completion so the user gets a reply.
         completion = await self._client.complete(working, tools=None)
         self._log_cache_usage(completion)
-        return completion.choices[0].message.content or ""
+        return _parse_reply(completion.choices[0].message.content or "")
 
     async def _run_tool(self, call: Any) -> dict:
         try:

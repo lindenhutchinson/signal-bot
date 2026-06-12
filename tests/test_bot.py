@@ -5,6 +5,7 @@ import pytest
 from signal_chatbot.bot import Bot
 from signal_chatbot.commands.parser import Command
 from signal_chatbot.history import HistoryStore
+from signal_chatbot.llm.conversation import BotReply
 from signal_chatbot.llm.prompt import BOT_SENDER
 from signal_chatbot.state import DirectiveSet
 from signal_chatbot.transport.models import IncomingMessage, OutgoingMessage
@@ -34,16 +35,29 @@ class FakeSignal:
 
 
 class FakeConversation:
-    def __init__(self, reply: str = "the answer", error: Exception | None = None) -> None:
+    def __init__(
+        self, reply: str = "the answer", disclaimer: str = "", error: Exception | None = None
+    ) -> None:
         self.reply = reply
+        self.disclaimer = disclaimer
         self.error = error
         self.seen: list[list[dict]] = []
 
-    async def respond(self, messages: list[dict]) -> str:
+    async def respond(self, messages: list[dict]) -> BotReply:
         self.seen.append(messages)
         if self.error is not None:
             raise self.error
-        return self.reply
+        return BotReply(message=self.reply, ethical_disclaimer=self.disclaimer)
+
+
+class FakeDisclaimers:
+    def __init__(self) -> None:
+        self.logged: list[tuple] = []
+
+    async def add_disclaimer(
+        self, group_id: str, *, message: str, disclaimer: str, created_at: int
+    ) -> None:
+        self.logged.append((group_id, message, disclaimer, created_at))
 
 
 class FakeCommands:
@@ -86,6 +100,7 @@ def make_bot(history, signal, conversation, **overrides) -> Bot:
         conversation=conversation,
         commands=FakeCommands(),
         state=FakeState(),
+        disclaimers=FakeDisclaimers(),
         system_prompt="You are Bot.",
         allowed_group_ids=[GROUP],
         allowed_senders=[],
@@ -192,6 +207,29 @@ async def test_command_from_disallowed_group_is_ignored(history) -> None:
 
     assert commands.handled == []
     assert signal.sent == []
+
+
+async def test_ethical_disclaimer_is_logged_but_not_sent(history) -> None:
+    signal = FakeSignal()
+    convo = FakeConversation(reply="you're all doomed", disclaimer="jk, love you")
+    disclaimers = FakeDisclaimers()
+    bot = make_bot(history, signal, convo, disclaimers=disclaimers)
+
+    await bot.handle(message("@bot roast us"))
+
+    assert signal.sent[0].text == "you're all doomed"  # disclaimer never reaches Signal
+    assert disclaimers.logged == [(GROUP, "you're all doomed", "jk, love you", 1)]
+
+
+async def test_no_disclaimer_logged_when_field_is_empty(history) -> None:
+    signal = FakeSignal()
+    convo = FakeConversation(reply="hello", disclaimer="")
+    disclaimers = FakeDisclaimers()
+    bot = make_bot(history, signal, convo, disclaimers=disclaimers)
+
+    await bot.handle(message("@bot hi"))
+
+    assert disclaimers.logged == []
 
 
 async def test_reply_threads_directives_and_command_log(history) -> None:

@@ -57,6 +57,7 @@ async def _run() -> None:
         conversation=conversation,
         commands=commands,
         state=state,
+        disclaimers=state,
         system_prompt=settings.load_system_prompt(),
         allowed_group_ids=settings.allowed_group_ids,
         allowed_senders=settings.allowed_senders,

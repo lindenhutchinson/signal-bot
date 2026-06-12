@@ -115,6 +115,23 @@ async def test_clear_wipes_history_and_logs(stores) -> None:
     assert [c.command for c in await state.recent_commands(GROUP)] == ["@clear"]
 
 
+async def test_disclaimers_lists_logged_asides(stores) -> None:
+    state, history = stores
+    await state.add_disclaimer(GROUP, message="doomed", disclaimer="jk", created_at=1781274720000)
+    r = router(state, history)
+
+    out = await _run(r, "@disclaimers")
+
+    assert out.startswith('Disclaimers:\n1. [2026-06-12 14:32] "jk" — re: "doomed"')
+
+
+async def test_disclaimers_empty(stores) -> None:
+    state, history = stores
+    r = router(state, history)
+
+    assert await _run(r, "@disclaimers") == "No disclaimers yet."
+
+
 async def test_help_returns_help_text(stores) -> None:
     state, history = stores
     r = router(state, history)
