@@ -58,6 +58,7 @@ def test_help_text_lists_every_command() -> None:
         "@disclaimers",
         "@reset",
         "@clear",
+        "@lobotomy",
         "@help",
     ):
         assert token in replies.HELP_TEXT

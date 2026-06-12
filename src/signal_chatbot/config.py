@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     max_tool_iterations: int = 5
     command_log_window: int = 40
     reset_farewell_max_chars: int = 200
+    default_display_name: str = "bot"
 
     @field_validator("allowed_group_ids", "allowed_senders", mode="before")
     @classmethod

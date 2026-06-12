@@ -51,12 +51,13 @@ async def stores(tmp_path: Path):
     await history.aclose()
 
 
-def router(state, history, *, farewell=None, name_setter=None) -> CommandRouter:
+def router(state, history, *, farewell=None, name_setter=None, default_name="bot") -> CommandRouter:
     return CommandRouter(
         state=state,
         history=history,
         farewell=farewell or FakeFarewellWriter(None),
         name_setter=name_setter or FakeNameSetter(),
+        default_name=default_name,
     )
 
 
@@ -208,6 +209,28 @@ async def test_reset_anchors_history_window_to_the_reset_point(stores) -> None:
     # the farewell saw the old conversation, but the new generation does not
     assert [m.text for m in farewell.seen_history] == ["before reset"]
     assert [m.text for m in await history.recent(GROUP)] == ["after reset"]
+
+
+async def test_lobotomy_wipes_directives_history_and_resets_name(stores) -> None:
+    state, history = stores
+    await state.add_directive(
+        GROUP, kind="rule", author_name="A", author_number="+1", text="a rule", created_at=1
+    )
+    await state.add_directive(
+        GROUP, kind="lore", author_name="A", author_number="+1", text="a memory", created_at=1
+    )
+    await history.append(GROUP, sender="Alice", text="something", timestamp=1)
+    name_setter = FakeNameSetter()
+    r = router(state, history, name_setter=name_setter, default_name="bot")
+
+    out = await _run(r, "@lobotomy")
+
+    assert out == replies.LOBOTOMISED
+    directives = await state.directives(GROUP)
+    assert directives.rules == [] and directives.lore == [] and directives.patches == []
+    assert await history.recent(GROUP) == []
+    assert name_setter.names == ["bot"]
+    assert [c.command for c in await state.recent_commands(GROUP)] == ["@lobotomy"]
 
 
 async def test_reset_without_usable_farewell_wipes_cleanly(stores) -> None:

@@ -14,6 +14,7 @@ RULE_LOGGED = "Rule logged. ⚖️"
 LORE_ADDED = "Lore added. 📜"
 HISTORY_CLEARED = "History cleared — windowing fresh from here."
 RESET_CLEAN = "Reset — everything's gone. Starting over."
+LOBOTOMISED = "Lobotomised. Patches, rules, lore, history, name — all gone. Blank slate."
 
 USAGE_PATCH = "Usage: @patch <text> — adds a general directive."
 USAGE_RULE = "Usage: @rule <text> — adds a hard rule the bot must follow."
@@ -32,6 +33,7 @@ HELP_TEXT = (
     "  @disclaimers    Show the asides the bot attached to its messages.\n"
     "  @reset          Wipe all patches, rules & lore. The bot leaves a parting note.\n"
     "  @clear          Wipe chat history; the bot windows fresh from here.\n"
+    "  @lobotomy       Nuke EVERYTHING: patches, rules, lore, history & name. No goodbye.\n"
     "  @help           Show this message."
 )
 

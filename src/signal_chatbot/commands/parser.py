@@ -23,6 +23,7 @@ class CommandName(StrEnum):
     DISCLAIMERS = "disclaimers"
     RESET = "reset"
     CLEAR = "clear"
+    LOBOTOMY = "lobotomy"
     HELP = "help"
 
 

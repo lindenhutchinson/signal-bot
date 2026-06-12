@@ -29,11 +29,13 @@ class CommandRouter:
         history: HistoryStore,
         farewell: FarewellWriter,
         name_setter: ProfileNameSetter,
+        default_name: str,
     ):
         self._state = state
         self._history = history
         self._farewell = farewell
         self._name_setter = name_setter
+        self._default_name = default_name
 
     async def handle(self, command: Command, message: IncomingMessage) -> str:
         """Apply ``command`` for ``message`` and return the text to reply with."""
@@ -72,6 +74,8 @@ class CommandRouter:
                 return await self._clear(message)
             case CommandName.RESET:
                 return await self._reset(message)
+            case CommandName.LOBOTOMY:
+                return await self._lobotomy(message)
             case CommandName.HELP:
                 return replies.HELP_TEXT
 
@@ -123,6 +127,14 @@ class CommandRouter:
             created_at=message.timestamp,
         )
         return replies.format_farewell(farewell.name, farewell.final_message)
+
+    async def _lobotomy(self, message: IncomingMessage) -> str:
+        """Total wipe: directives, history, and name — no farewell, no survivor."""
+        await self._state.clear_directives(message.group_id)
+        await self._history.clear(message.group_id)
+        await self._rename_best_effort(self._default_name)
+        await self._log(message, CommandName.LOBOTOMY)
+        return replies.LOBOTOMISED
 
     async def _rename_best_effort(self, name: str) -> None:
         """Rename the bot to its new self; never let a failed rename abort the reset."""

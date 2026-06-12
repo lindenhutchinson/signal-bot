@@ -50,6 +50,7 @@ async def _run() -> None:
         history=history,
         farewell=LlmFarewellWriter(llm, max_chars=settings.reset_farewell_max_chars),
         name_setter=signal,
+        default_name=settings.default_display_name,
     )
     bot = Bot(
         signal=signal,

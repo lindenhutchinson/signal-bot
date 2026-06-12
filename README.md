@@ -40,6 +40,7 @@ Commands must be the **start** of the message; the `@bot` trigger is unaffected.
 @disclaimers    Show the asides the bot attached to its messages.
 @reset          Wipe all patches, rules & lore. The bot leaves a parting note.
 @clear          Wipe chat history; the bot windows fresh from here.
+@lobotomy       Nuke EVERYTHING: patches, rules, lore, history & name. No goodbye.
 @help           Show this message.
 ```
 
@@ -50,6 +51,9 @@ Commands must be the **start** of the message; the `@bot` trigger is unaffected.
 - **`@reset`** asks the model for a one-sentence farewell to its future self
   (`Final message from <name>: …`), wipes everything, then seeds that sentence
   back as the sole surviving piece of lore — so identity passes down a generation.
+- **`@lobotomy`** is the nuclear option: it wipes directives *and* history *and*
+  resets the display name (`DEFAULT_DISPLAY_NAME`), with no farewell and no
+  surviving lore — a true blank slate. (Disclaimers and the command log are kept.)
 - A contentless **command-activity log** (who ran what command, when — never the
   arguments) is also injected into the prompt, giving the bot a sense of how its
   state has been churning without exposing the contents.
