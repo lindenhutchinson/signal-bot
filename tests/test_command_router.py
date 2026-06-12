@@ -22,8 +22,10 @@ def message(text: str, *, sender_name: str = "Alice", ts: int = 1781274720000) -
 class FakeFarewellWriter:
     def __init__(self, result: Farewell | None) -> None:
         self.result = result
+        self.seen_history = None
 
     async def write(self, *, directives, history) -> Farewell | None:
+        self.seen_history = history
         return self.result
 
 
@@ -175,6 +177,20 @@ async def test_empty_name_returns_usage_and_does_not_log(stores) -> None:
     assert await _run(r, "@name") == replies.USAGE_NAME
     assert name_setter.names == []
     assert await state.recent_commands(GROUP) == []
+
+
+async def test_reset_anchors_history_window_to_the_reset_point(stores) -> None:
+    state, history = stores
+    await history.append(GROUP, sender="Alice", text="before reset", timestamp=1)
+    farewell = FakeFarewellWriter(Farewell(name="Greg", final_message="Bye."))
+    r = router(state, history, farewell=farewell)
+
+    await _run(r, "@reset")
+    await history.append(GROUP, sender="Alice", text="after reset", timestamp=2)
+
+    # the farewell saw the old conversation, but the new generation does not
+    assert [m.text for m in farewell.seen_history] == ["before reset"]
+    assert [m.text for m in await history.recent(GROUP)] == ["after reset"]
 
 
 async def test_reset_without_usable_farewell_wipes_cleanly(stores) -> None:

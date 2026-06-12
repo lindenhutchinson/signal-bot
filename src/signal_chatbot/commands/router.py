@@ -105,6 +105,7 @@ class CommandRouter:
         history = await self._history.recent(message.group_id)
         farewell = await self._farewell.write(directives=directives, history=history)
         await self._state.clear_directives(message.group_id)
+        await self._history.set_floor(message.group_id)
         await self._log(message, CommandName.RESET)
         if farewell is None:
             return replies.RESET_CLEAN
