@@ -1,0 +1,46 @@
+"""All user-facing command output, in one place for easy tuning."""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+from signal_chatbot.state import Directive
+from signal_chatbot.timefmt import format_timestamp
+
+PATCHED = "Patched. 🩹"
+RULE_LOGGED = "Rule logged. ⚖️"
+LORE_ADDED = "Lore added. 📜"
+HISTORY_CLEARED = "History cleared — windowing fresh from here."
+RESET_CLEAN = "Reset — everything's gone. Starting over."
+
+USAGE_PATCH = "Usage: @patch <text> — adds a general directive."
+USAGE_RULE = "Usage: @rule <text> — adds a hard rule the bot must follow."
+USAGE_LORE = "Usage: @lore <text> — adds a fact the bot treats as true."
+
+HELP_TEXT = (
+    "Commands (anyone can run these):\n"
+    "  @patch <text>   Add a general directive the bot follows.\n"
+    "  @rule <text>    Add a hard rule the bot must obey.\n"
+    "  @lore <text>    Add a fact/story the bot treats as true.\n"
+    "  @patchlist      List active patches (who added them, when).\n"
+    "  @rulelist       List active rules.\n"
+    "  @lorelist       List active lore.\n"
+    "  @reset          Wipe all patches, rules & lore. The bot leaves a parting note.\n"
+    "  @clear          Wipe chat history; the bot windows fresh from here.\n"
+    "  @help           Show this message."
+)
+
+
+def format_list(title: str, directives: Sequence[Directive]) -> str:
+    """Render a directive list with 1-based numbering, author, and time."""
+    if not directives:
+        return f"No {title.lower()} yet."
+    lines = [f"{title}:"]
+    for i, d in enumerate(directives, 1):
+        lines.append(f'{i}. "{d.text}" — {d.author_name}, {format_timestamp(d.created_at)}')
+    return "\n".join(lines)
+
+
+def format_farewell(name: str, final_message: str) -> str:
+    """The message the group sees when the bot is reset."""
+    return f"Final message from {name}:\n{final_message}"

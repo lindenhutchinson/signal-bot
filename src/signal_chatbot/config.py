@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     history_window_max: int = 40
     database_path: Path = Path("data/history.sqlite")
     max_tool_iterations: int = 5
+    command_log_window: int = 40
+    reset_farewell_max_chars: int = 200
 
     @field_validator("allowed_group_ids", "allowed_senders", mode="before")
     @classmethod

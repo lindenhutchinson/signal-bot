@@ -39,6 +39,16 @@ async def test_history_is_isolated_per_group(store: HistoryStore) -> None:
     assert [m.text for m in await store.recent("g2")] == ["two"]
 
 
+async def test_clear_removes_only_the_target_group(store: HistoryStore) -> None:
+    await store.append("g1", sender="A", text="one", timestamp=1)
+    await store.append("g2", sender="B", text="two", timestamp=1)
+
+    await store.clear("g1")
+
+    assert await store.recent("g1") == []
+    assert [m.text for m in await store.recent("g2")] == ["two"]
+
+
 async def test_history_persists_across_reconnect(tmp_path: Path) -> None:
     path = tmp_path / "h.sqlite"
     s1 = HistoryStore(path, window_max=10)

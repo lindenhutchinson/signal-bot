@@ -83,6 +83,11 @@ class HistoryStore:
         rows = await cursor.fetchall()
         return [StoredMessage(r["sender"], r["text"], r["timestamp"]) for r in rows]
 
+    async def clear(self, group_id: str) -> None:
+        """Delete all stored messages for a group (the bot windows fresh from here)."""
+        await self._conn.execute("DELETE FROM messages WHERE group_id = ?", (group_id,))
+        await self._conn.commit()
+
     async def aclose(self) -> None:
         if self._db is not None:
             await self._db.close()

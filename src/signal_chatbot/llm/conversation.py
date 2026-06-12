@@ -14,7 +14,12 @@ log = get_logger(__name__)
 class CompletionClient(Protocol):
     """The slice of :class:`DeepSeekClient` the loop depends on (eases testing)."""
 
-    async def complete(self, messages: list[dict], tools: list[dict] | None = None) -> Any: ...
+    async def complete(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        response_format: dict | None = None,
+    ) -> Any: ...
 
 
 class Conversation:

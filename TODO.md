@@ -8,7 +8,7 @@ Status legend: `todo` · `spec` · `building` · `done`
 
 | # | Feature | Fun/Impact | Effort | Depends on | Status |
 |---|---------|-----------|--------|-----------|--------|
-| 1 | **Command system** — `@`-prefixed commands intercepted before the LLM (`@patch`/`@rule`/`@lore`/`@reset`/`@clear`/`@*list`/`@help`). Also delivers the directive storage + prompt-injection engine (the write-half of #3 & #4) and a command-event tracker. Spec: `docs/superpowers/specs/2026-06-12-command-system-design.md`. | High (enabler) | Med | — | `spec` |
+| 1 | **Command system** — `@`-prefixed commands intercepted before the LLM (`@patch`/`@rule`/`@lore`/`@reset`/`@clear`/`@*list`/`@help`). Also delivers the directive storage + prompt-injection engine (the write-half of #3 & #4) and a command-event tracker. Spec: `docs/superpowers/specs/2026-06-12-command-system-design.md` · Plan: `docs/superpowers/plans/2026-06-12-command-system.md`. | High (enabler) | Med | — | `done` |
 | 2 | **Weird utility tools** — dice rolls, vibe checks, semi-useful nonsense. Drops straight into the existing `tools/` framework. | Med-High | Low | — | `todo` |
 | 3 | **Patch system — compression** — the storage/injection ships in #1; this cycle adds compressing old patches/rules into terse "patch notes" to save tokens. | High (novel) | Med | #1 | `todo` |
 | 4 | **Group lore / memory** — storage/injection ships in #1; this cycle adds richer recall/callbacks beyond raw `@lore` entries. | High | Med | #1 | `todo` |

@@ -10,11 +10,14 @@ import argparse
 import asyncio
 
 from signal_chatbot.bot import Bot
+from signal_chatbot.commands.farewell import LlmFarewellWriter
+from signal_chatbot.commands.router import CommandRouter
 from signal_chatbot.config import Settings
 from signal_chatbot.history import HistoryStore
 from signal_chatbot.llm.conversation import Conversation
 from signal_chatbot.llm.deepseek import DeepSeekClient
 from signal_chatbot.logging import configure_logging, get_logger
+from signal_chatbot.state import StateStore
 from signal_chatbot.tools import ToolRegistry
 from signal_chatbot.tools.builtin import default_tools
 from signal_chatbot.transport import SignalClient
@@ -30,6 +33,8 @@ async def _run() -> None:
     signal = SignalClient(settings.signal_api_url, settings.bot_number)
     history = HistoryStore(settings.database_path, window_max=settings.history_window_max)
     await history.connect()
+    state = StateStore(settings.database_path, command_log_window=settings.command_log_window)
+    await state.connect()
     llm = DeepSeekClient(
         api_key=settings.deepseek_api_key,
         model=settings.deepseek_model,
@@ -40,10 +45,17 @@ async def _run() -> None:
         ToolRegistry(default_tools()),
         max_iterations=settings.max_tool_iterations,
     )
+    commands = CommandRouter(
+        state=state,
+        history=history,
+        farewell=LlmFarewellWriter(llm, max_chars=settings.reset_farewell_max_chars),
+    )
     bot = Bot(
         signal=signal,
         history=history,
         conversation=conversation,
+        commands=commands,
+        state=state,
         system_prompt=settings.load_system_prompt(),
         allowed_group_ids=settings.allowed_group_ids,
         allowed_senders=settings.allowed_senders,
@@ -63,6 +75,7 @@ async def _run() -> None:
         await signal.aclose()
         await llm.aclose()
         await history.aclose()
+        await state.aclose()
 
 
 async def _list_groups() -> None:

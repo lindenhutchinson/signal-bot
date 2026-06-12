@@ -23,6 +23,35 @@ Signal group ──▶ signal-cli-rest-api ──ws──▶ Bot ──▶ DeepS
   backfill messages from before the bot joined, so history accumulates from the
   moment the bot is added to the group.
 
+## Commands
+
+Anyone in an allowlisted group can run these `@`-prefixed commands. They are a
+fast path handled **without** calling the LLM (the one exception is `@reset`).
+Commands must be the **start** of the message; the `@bot` trigger is unaffected.
+
+```
+@patch <text>   Add a general directive the bot follows.
+@rule <text>    Add a hard rule the bot must obey.
+@lore <text>    Add a fact/story the bot treats as true.
+@patchlist      List active patches (who added them, when).
+@rulelist       List active rules.
+@lorelist       List active lore.
+@reset          Wipe all patches, rules & lore. The bot leaves a parting note.
+@clear          Wipe chat history; the bot windows fresh from here.
+@help           Show this message.
+```
+
+- **Patches, rules, and lore** are per-group and injected into the system prompt
+  as labelled sections. They are gospel: on a contradiction, the **most recent**
+  (lower) entry wins. `@clear` only wipes conversation history; `@reset` only
+  wipes directives — the two are independent.
+- **`@reset`** asks the model for a one-sentence farewell to its future self
+  (`Final message from <name>: …`), wipes everything, then seeds that sentence
+  back as the sole surviving piece of lore — so identity passes down a generation.
+- A contentless **command-activity log** (who ran what command, when — never the
+  arguments) is also injected into the prompt, giving the bot a sense of how its
+  state has been churning without exposing the contents.
+
 ## Project layout
 
 ```
@@ -30,6 +59,8 @@ src/signal_chatbot/
   config.py            # env-driven settings
   transport/           # Signal adapter (signal-cli-rest-api): receive + send
   history/             # SQLite per-group rolling history
+  state/               # SQLite per-group directives + command-event log
+  commands/            # @-command parsing, dispatch, reply text, reset farewell
   llm/                 # DeepSeek client, prompt assembly, tool-calling loop
   tools/               # tool framework + builtin tools
   bot.py               # orchestrator
@@ -63,8 +94,10 @@ Copy `.env.example` to `.env` and fill it in:
 | `TRIGGER_ALIAS` | Mention that triggers the bot (default `@bot`) |
 | `SYSTEM_PROMPT_PATH` | Path to the system prompt file |
 | `HISTORY_WINDOW_MAX` | Max recent messages kept per group as context |
-| `DATABASE_PATH` | SQLite history file |
+| `DATABASE_PATH` | SQLite file (history + command state) |
 | `MAX_TOOL_ITERATIONS` | Max tool round-trips per reply |
+| `COMMAND_LOG_WINDOW` | Command-activity events kept per group as context (default 40) |
+| `RESET_FAREWELL_MAX_CHARS` | Cap on the `@reset` farewell sentence (default 200) |
 
 ## signal-cli version pin (temporary — read before deploying)
 

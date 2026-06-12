@@ -19,12 +19,18 @@ class DeepSeekClient:
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._model = model
 
-    async def complete(self, messages: list[dict], tools: list[dict] | None = None) -> Any:
+    async def complete(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        response_format: dict | None = None,
+    ) -> Any:
         """Return a chat completion for ``messages``, optionally offering ``tools``."""
         return await self._client.chat.completions.create(
             model=self._model,
             messages=messages,
             tools=tools if tools else _NOT_GIVEN,
+            response_format=response_format if response_format else _NOT_GIVEN,
         )
 
     async def aclose(self) -> None:

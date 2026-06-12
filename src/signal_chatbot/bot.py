@@ -12,9 +12,11 @@ import asyncio
 from collections import defaultdict
 from typing import Protocol
 
+from signal_chatbot.commands.parser import Command, parse
 from signal_chatbot.history import HistoryStore
 from signal_chatbot.llm.prompt import BOT_SENDER, build_messages
 from signal_chatbot.logging import get_logger
+from signal_chatbot.state import DirectiveSet, LoggedCommand
 from signal_chatbot.transport.models import IncomingMessage, OutgoingMessage
 
 log = get_logger(__name__)
@@ -36,6 +38,19 @@ class Stream(Sender, Protocol):
     def stream(self): ...
 
 
+class Commands(Protocol):
+    """Applies a parsed command and returns the reply text (satisfied by CommandRouter)."""
+
+    async def handle(self, command: Command, message: IncomingMessage) -> str: ...
+
+
+class StateReader(Protocol):
+    """The state slice the reply path reads (satisfied by StateStore)."""
+
+    async def directives(self, group_id: str) -> DirectiveSet: ...
+    async def recent_commands(self, group_id: str) -> list[LoggedCommand]: ...
+
+
 class Bot:
     """Coordinates incoming messages, history, and LLM replies."""
 
@@ -45,6 +60,8 @@ class Bot:
         signal: Sender,
         history: HistoryStore,
         conversation: Responder,
+        commands: Commands,
+        state: StateReader,
         system_prompt: str,
         allowed_group_ids: list[str],
         allowed_senders: list[str],
@@ -54,6 +71,8 @@ class Bot:
         self._signal = signal
         self._history = history
         self._conversation = conversation
+        self._commands = commands
+        self._state = state
         self._system_prompt = system_prompt
         self._allowed_groups = set(allowed_group_ids)
         self._allowed_senders = set(allowed_senders)
@@ -69,6 +88,12 @@ class Bot:
     async def handle(self, message: IncomingMessage) -> None:
         """Process a single incoming message."""
         if not self._is_allowed(message):
+            return
+
+        command = parse(message.text)
+        if command is not None:
+            reply = await self._commands.handle(command, message)
+            await self._signal.send(OutgoingMessage(group_id=message.group_id, text=reply))
             return
 
         await self._history.append(
@@ -92,7 +117,11 @@ class Bot:
     async def _reply(self, group_id: str, timestamp: int) -> None:
         try:
             history = await self._history.recent(group_id)
-            messages = build_messages(self._system_prompt, history)
+            directives = await self._state.directives(group_id)
+            command_log = await self._state.recent_commands(group_id)
+            messages = build_messages(
+                self._system_prompt, history, directives=directives, command_log=command_log
+            )
             answer = (await self._conversation.respond(messages)).strip()
         except Exception as exc:  # noqa: BLE001 - never let one message kill the loop
             log.error("bot.reply_failed", group=group_id, error=str(exc))
