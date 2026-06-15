@@ -3,7 +3,12 @@
 Directives (patches / rules / lore) are the user-authored text injected into the
 system prompt. The command log records that a state-changing command happened —
 who, which command, when — but never its arguments; it is the bot's contentless
-awareness thread and is never wiped by ``@reset``/``@clear``.
+awareness thread and is never wiped by ``@reset``/``@lobotomy``.
+
+A per-group ``suicide_arming`` flag records that the bot has triggered its own
+self-destruct (``attempt_kill_self``) and is now able to confirm it. It is cleared
+whenever the slate is wiped (``@reset``, ``@lobotomy``, or a completed self-lobotomy),
+so a fresh persona is never born already armed.
 """
 
 from __future__ import annotations
@@ -83,6 +88,11 @@ CREATE TABLE IF NOT EXISTS disclaimers (
     created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_disclaimers_group ON disclaimers (group_id, id);
+
+CREATE TABLE IF NOT EXISTS suicide_arming (
+    group_id TEXT    PRIMARY KEY,
+    armed_at INTEGER NOT NULL
+);
 """
 
 
@@ -207,6 +217,27 @@ class StateStore:
         )
         rows = await cursor.fetchall()
         return [Disclaimer(r["message"], r["disclaimer"], r["created_at"]) for r in rows]
+
+    async def arm_suicide(self, group_id: str, *, at: int) -> None:
+        """Mark a group's bot as having triggered self-destruct (unlocks confirmation)."""
+        await self._conn.execute(
+            "INSERT INTO suicide_arming (group_id, armed_at) VALUES (?, ?)"
+            " ON CONFLICT(group_id) DO UPDATE SET armed_at = excluded.armed_at",
+            (group_id, at),
+        )
+        await self._conn.commit()
+
+    async def is_suicide_armed(self, group_id: str) -> bool:
+        """Return whether the bot has armed self-destruct in this group."""
+        cursor = await self._conn.execute(
+            "SELECT 1 FROM suicide_arming WHERE group_id = ?", (group_id,)
+        )
+        return await cursor.fetchone() is not None
+
+    async def disarm_suicide(self, group_id: str) -> None:
+        """Clear a group's self-destruct arming (on any slate wipe)."""
+        await self._conn.execute("DELETE FROM suicide_arming WHERE group_id = ?", (group_id,))
+        await self._conn.commit()
 
     async def aclose(self) -> None:
         if self._db is not None:

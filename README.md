@@ -38,19 +38,19 @@ Commands must be the **start** of the message; the `@bot` trigger is unaffected.
 @rulelist       List active rules.
 @lorelist       List active lore.
 @disclaimers    Show the asides the bot attached to its messages.
-@reset          Wipe all patches, rules & lore. The bot leaves a parting note.
-@clear          Wipe chat history; the bot windows fresh from here.
+@reset          Wipe patches, rules, lore & history. The bot leaves a parting note.
 @lobotomy       Nuke EVERYTHING: patches, rules, lore, history & name. No goodbye.
 @help           Show this message.
 ```
 
 - **Patches, rules, and lore** are per-group and injected into the system prompt
   as labelled sections. They are gospel: on a contradiction, the **most recent**
-  (lower) entry wins. `@clear` only wipes conversation history; `@reset` only
-  wipes directives — the two are independent.
-- **`@reset`** asks the model for a one-sentence farewell to its future self
-  (`Final message from <name>: …`), wipes everything, then seeds that sentence
-  back as the sole surviving piece of lore — so identity passes down a generation.
+  (lower) entry wins.
+- **`@reset`** is the soft wipe: it asks the model for a one-sentence farewell to its
+  future self (`Final message from <name>: …`), clears patches, rules, lore **and chat
+  history**, renames the bot to the new generation's chosen name, then seeds that
+  sentence back as the sole surviving piece of lore — so identity passes down a
+  generation.
 - **`@lobotomy`** is the nuclear option: it wipes directives *and* history *and*
   resets the display name (`DEFAULT_DISPLAY_NAME`), with no farewell and no
   surviving lore — a true blank slate. (Disclaimers and the command log are kept.)
@@ -59,6 +59,17 @@ Commands must be the **start** of the message; the `@bot` trigger is unaffected.
   state has been churning without exposing the contents.
 - The bot can **rename itself** mid-conversation via a `set_name` tool, and `@reset`
   renames it to the new generation's chosen name.
+
+### The bot can end itself
+
+The bot also has a private, two-step way to wipe *itself* — no human command needed.
+It is offered a tool it believes will kill it outright (`attempt_kill_self`); calling it
+doesn't actually end the bot but **arms** the kill and reveals a second, real step
+(`confirm_kill_self`) that is only unlocked on a *later* turn. That gap is deliberate:
+the group gets a chance to talk it down. If, when next summoned, the (armed) bot still
+chooses to confirm, it delivers its final words and is wiped to a blank slate. Any
+`@reset`/`@lobotomy` in between disarms it. The arming flag persists per-group in the
+state DB.
 
 ## Replies, disclaimers & timestamps
 

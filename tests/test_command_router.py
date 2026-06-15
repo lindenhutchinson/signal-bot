@@ -1,4 +1,5 @@
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -7,6 +8,7 @@ from signal_chatbot.commands.farewell import Farewell
 from signal_chatbot.commands.parser import parse
 from signal_chatbot.commands.router import CommandRouter
 from signal_chatbot.history import HistoryStore
+from signal_chatbot.lobotomy import Lobotomiser
 from signal_chatbot.state import StateStore
 from signal_chatbot.transport.models import IncomingMessage
 
@@ -52,12 +54,17 @@ async def stores(tmp_path: Path):
 
 
 def router(state, history, *, farewell=None, name_setter=None, default_name="bot") -> CommandRouter:
+    setter = name_setter or FakeNameSetter()
+    lobotomiser = Lobotomiser(
+        state=state, history=history, name_setter=setter, default_name=default_name
+    )
     return CommandRouter(
         state=state,
         history=history,
         farewell=farewell or FakeFarewellWriter(None),
-        name_setter=name_setter or FakeNameSetter(),
-        default_name=default_name,
+        name_setter=setter,
+        lobotomiser=lobotomiser,
+        timezone=ZoneInfo("Australia/Sydney"),
     )
 
 
@@ -106,16 +113,6 @@ async def test_patchlist_renders_entries(stores) -> None:
     assert out.startswith('Patches:\n1. "no puns" — Alice,')
 
 
-async def test_clear_wipes_history_and_logs(stores) -> None:
-    state, history = stores
-    await history.append(GROUP, sender="Alice", text="old", timestamp=1)
-    r = router(state, history)
-
-    assert await _run(r, "@clear") == replies.HISTORY_CLEARED
-    assert await history.recent(GROUP) == []
-    assert [c.command for c in await state.recent_commands(GROUP)] == ["@clear"]
-
-
 async def test_disclaimers_lists_logged_asides(stores) -> None:
     state, history = stores
     await state.add_disclaimer(GROUP, message="doomed", disclaimer="jk", created_at=1781274720000)
@@ -123,7 +120,7 @@ async def test_disclaimers_lists_logged_asides(stores) -> None:
 
     out = await _run(r, "@disclaimers")
 
-    assert out.startswith('Disclaimers:\n1. [2026-06-12 14:32] "jk" — re: "doomed"')
+    assert out.startswith('Disclaimers:\n1. [2026-06-13 00:32 AEST] "jk" — re: "doomed"')
 
 
 async def test_disclaimers_empty(stores) -> None:
@@ -197,7 +194,7 @@ async def test_empty_name_returns_usage_and_does_not_log(stores) -> None:
     assert await state.recent_commands(GROUP) == []
 
 
-async def test_reset_anchors_history_window_to_the_reset_point(stores) -> None:
+async def test_reset_wipes_history_after_the_farewell_reads_it(stores) -> None:
     state, history = stores
     await history.append(GROUP, sender="Alice", text="before reset", timestamp=1)
     farewell = FakeFarewellWriter(Farewell(name="Greg", final_message="Bye."))
@@ -206,9 +203,29 @@ async def test_reset_anchors_history_window_to_the_reset_point(stores) -> None:
     await _run(r, "@reset")
     await history.append(GROUP, sender="Alice", text="after reset", timestamp=2)
 
-    # the farewell saw the old conversation, but the new generation does not
+    # the farewell saw the old conversation, but it's deleted and the new generation does not
     assert [m.text for m in farewell.seen_history] == ["before reset"]
     assert [m.text for m in await history.recent(GROUP)] == ["after reset"]
+
+
+async def test_reset_disarms_pending_self_destruct(stores) -> None:
+    state, history = stores
+    await state.arm_suicide(GROUP, at=1)
+    r = router(state, history, farewell=FakeFarewellWriter(None))
+
+    await _run(r, "@reset")
+
+    assert await state.is_suicide_armed(GROUP) is False
+
+
+async def test_lobotomy_disarms_pending_self_destruct(stores) -> None:
+    state, history = stores
+    await state.arm_suicide(GROUP, at=1)
+    r = router(state, history)
+
+    await _run(r, "@lobotomy")
+
+    assert await state.is_suicide_armed(GROUP) is False
 
 
 async def test_lobotomy_wipes_directives_history_and_resets_name(stores) -> None:

@@ -1,5 +1,9 @@
+from zoneinfo import ZoneInfo
+
 from signal_chatbot.commands import replies
 from signal_chatbot.state import Directive, Disclaimer
+
+SYDNEY = ZoneInfo("Australia/Sydney")
 
 
 def _directive(text: str, *, created_at: int = 1781274720000) -> Directive:
@@ -9,17 +13,19 @@ def _directive(text: str, *, created_at: int = 1781274720000) -> Directive:
 
 
 def test_format_list_numbers_entries_with_author_and_time() -> None:
-    out = replies.format_list("Patches", [_directive("no puns"), _directive("haiku only")])
+    out = replies.format_list(
+        "Patches", [_directive("no puns"), _directive("haiku only")], tz=SYDNEY
+    )
 
     assert out == (
         "Patches:\n"
-        '1. "no puns" — Alice, 2026-06-12 14:32\n'
-        '2. "haiku only" — Alice, 2026-06-12 14:32'
+        '1. "no puns" — Alice, 2026-06-13 00:32 AEST\n'
+        '2. "haiku only" — Alice, 2026-06-13 00:32 AEST'
     )
 
 
 def test_format_list_empty_says_none_yet() -> None:
-    assert replies.format_list("Rules", []) == "No rules yet."
+    assert replies.format_list("Rules", [], tz=SYDNEY) == "No rules yet."
 
 
 def test_format_farewell_matches_required_shape() -> None:
@@ -37,13 +43,13 @@ def test_format_disclaimers_lists_aside_and_message_excerpt() -> None:
         Disclaimer(message="you are doomed", disclaimer="kidding", created_at=1781274720000)
     ]
 
-    out = replies.format_disclaimers(disclaimers)
+    out = replies.format_disclaimers(disclaimers, tz=SYDNEY)
 
-    assert out == 'Disclaimers:\n1. [2026-06-12 14:32] "kidding" — re: "you are doomed"'
+    assert out == 'Disclaimers:\n1. [2026-06-13 00:32 AEST] "kidding" — re: "you are doomed"'
 
 
 def test_format_disclaimers_empty() -> None:
-    assert replies.format_disclaimers([]) == "No disclaimers yet."
+    assert replies.format_disclaimers([], tz=SYDNEY) == "No disclaimers yet."
 
 
 def test_help_text_lists_every_command() -> None:
@@ -57,8 +63,11 @@ def test_help_text_lists_every_command() -> None:
         "@lorelist",
         "@disclaimers",
         "@reset",
-        "@clear",
         "@lobotomy",
         "@help",
     ):
         assert token in replies.HELP_TEXT
+
+
+def test_help_text_no_longer_lists_removed_clear_command() -> None:
+    assert "@clear" not in replies.HELP_TEXT

@@ -12,6 +12,7 @@ dependencies = [
     "websockets>=13",
     "aiosqlite>=0.20",
     "structlog>=24.4",
+    "tzdata>=2024.1",
 ]
 
 [project.scripts]

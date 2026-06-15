@@ -1,6 +1,10 @@
+from zoneinfo import ZoneInfo
+
 from signal_chatbot.history import StoredMessage
 from signal_chatbot.llm.prompt import BOT_SENDER, build_messages
 from signal_chatbot.state import Directive, DirectiveSet, LoggedCommand
+
+SYDNEY = ZoneInfo("Australia/Sydney")
 
 
 def _directive(kind: str, text: str) -> Directive:
@@ -16,7 +20,7 @@ def test_directive_sections_are_injected_into_the_system_message() -> None:
         lore=[_directive("lore", "Dave fears geese")],
     )
 
-    messages = build_messages("BASE", [], directives=directives, command_log=[])
+    messages = build_messages("BASE", [], timezone=SYDNEY, directives=directives, command_log=[])
     system = messages[0]["content"]
 
     assert system.startswith("BASE")
@@ -28,7 +32,9 @@ def test_directive_sections_are_injected_into_the_system_message() -> None:
 def test_empty_sections_are_omitted() -> None:
     directives = DirectiveSet(patches=[], rules=[_directive("rule", "no puns")], lore=[])
 
-    system = build_messages("BASE", [], directives=directives, command_log=[])[0]["content"]
+    system = build_messages("BASE", [], timezone=SYDNEY, directives=directives, command_log=[])[0][
+        "content"
+    ]
 
     assert "## Rules" in system
     assert "## Lore" not in system
@@ -38,22 +44,25 @@ def test_empty_sections_are_omitted() -> None:
 def test_command_activity_renders_without_arguments() -> None:
     log = [LoggedCommand(author_name="Bob", command="@reset", created_at=1781274720000)]
 
-    system = build_messages("BASE", [], directives=None, command_log=log)[0]["content"]
+    system = build_messages("BASE", [], timezone=SYDNEY, directives=None, command_log=log)[0][
+        "content"
+    ]
 
     assert "## Recent command activity" in system
-    assert "Bob · @reset · 2026-06-12 14:32" in system
+    assert "Bob · @reset · 2026-06-13 00:32 AEST" in system
 
 
 def test_base_prompt_is_followed_by_the_output_format_contract() -> None:
-    system = build_messages("BASE", [])[0]["content"]
+    system = build_messages("BASE", [], timezone=SYDNEY)[0]["content"]
 
     assert system.startswith("BASE")
-    assert "## How you must reply" in system
-    assert '"ethical_disclaimer"' in system
+    assert "## How you reply" in system
+    assert "final_answer" in system
+    assert "ethical_disclaimer" in system
 
 
 def test_system_message_is_first_and_starts_with_the_base_prompt() -> None:
-    messages = build_messages("You are Bot.", [])
+    messages = build_messages("You are Bot.", [], timezone=SYDNEY)
 
     assert messages[0]["role"] == "system"
     assert messages[0]["content"].startswith("You are Bot.")
@@ -62,9 +71,9 @@ def test_system_message_is_first_and_starts_with_the_base_prompt() -> None:
 def test_human_messages_are_user_role_labelled_by_sender_and_timestamped() -> None:
     history = [StoredMessage(sender="Alice", text="hello", timestamp=1781274720000)]
 
-    messages = build_messages("sys", history)
+    messages = build_messages("sys", history, timezone=SYDNEY)
 
-    assert messages[1] == {"role": "user", "content": "[2026-06-12 14:32] Alice: hello"}
+    assert messages[1] == {"role": "user", "content": "[2026-06-13 00:32 AEST] Alice: hello"}
 
 
 def test_bot_messages_map_to_assistant_role_unstamped_and_unlabelled() -> None:
@@ -73,9 +82,9 @@ def test_bot_messages_map_to_assistant_role_unstamped_and_unlabelled() -> None:
         StoredMessage(sender=BOT_SENDER, text="Hello Alice!", timestamp=1781274720000),
     ]
 
-    messages = build_messages("sys", history)
+    messages = build_messages("sys", history, timezone=SYDNEY)
 
     # User turns keep the [timestamp] for context; the bot's own turns are replayed
     # exactly as sent (no stamp) so it doesn't learn to echo the date into its replies.
-    assert messages[1] == {"role": "user", "content": "[2026-06-12 14:32] Alice: hi @bot"}
+    assert messages[1] == {"role": "user", "content": "[2026-06-13 00:32 AEST] Alice: hi @bot"}
     assert messages[2] == {"role": "assistant", "content": "Hello Alice!"}

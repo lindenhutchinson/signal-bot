@@ -84,3 +84,53 @@ async def test_extract_returns_none_when_no_pages() -> None:
         return httpx.Response(200, json={"query": {"pages": []}})
 
     assert await _client(handler).full("X") is None
+
+
+async def test_query_sends_maxlag() -> None:
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["maxlag"] = request.url.params.get("maxlag")
+        return httpx.Response(200, json={"query": {"search": []}})
+
+    await _client(handler).search("x", limit=3)
+
+    assert seen["maxlag"] == "5"
+
+
+async def test_retries_on_429_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    slept: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        slept.append(delay)
+
+    monkeypatch.setattr("signal_chatbot.tools.builtin.wikipedia.client.asyncio.sleep", fake_sleep)
+
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429, headers={"Retry-After": "7"}, text="slow down")
+        return httpx.Response(200, json={"query": {"search": []}})
+
+    await _client(handler).search("x", limit=3)
+
+    assert calls["n"] == 2
+    assert slept == [7.0]  # honoured the Retry-After header
+
+
+async def test_gives_up_after_max_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_sleep(delay: float) -> None:
+        pass
+
+    monkeypatch.setattr("signal_chatbot.tools.builtin.wikipedia.client.asyncio.sleep", fake_sleep)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, text="nope")
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = WikipediaClient(http, language="en", max_retries=2)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await client.search("x", limit=3)

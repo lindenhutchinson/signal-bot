@@ -22,7 +22,6 @@ class CommandName(StrEnum):
     LORELIST = "lorelist"
     DISCLAIMERS = "disclaimers"
     RESET = "reset"
-    CLEAR = "clear"
     LOBOTOMY = "lobotomy"
     HELP = "help"
 

@@ -12,12 +12,14 @@ import asyncio
 import httpx
 
 from signal_chatbot.bot import Bot
+from signal_chatbot.botname import BotName
 from signal_chatbot.commands.farewell import LlmFarewellWriter
 from signal_chatbot.commands.router import CommandRouter
 from signal_chatbot.config import Settings
 from signal_chatbot.history import HistoryStore
 from signal_chatbot.llm.conversation import Conversation
 from signal_chatbot.llm.deepseek import DeepSeekClient
+from signal_chatbot.lobotomy import Lobotomiser
 from signal_chatbot.logging import configure_logging, get_logger
 from signal_chatbot.state import StateStore
 from signal_chatbot.tools import ToolRegistry
@@ -38,6 +40,10 @@ async def _run() -> None:
     settings = Settings()  # type: ignore[call-arg]
 
     signal = SignalClient(settings.signal_api_url, settings.bot_number)
+    # Single source of truth for the bot's display name: every rename path (command,
+    # tool, reset, wipe) goes through this, and the bot reads it for the self-destruct
+    # warning. Initialised to the default until the first rename of the session.
+    bot_name = BotName(signal, initial=settings.default_display_name)
     history = HistoryStore(settings.database_path, window_max=settings.history_window_max)
     await history.connect()
     state = StateStore(settings.database_path, command_log_window=settings.command_log_window)
@@ -46,6 +52,7 @@ async def _run() -> None:
         api_key=settings.deepseek_api_key,
         model=settings.deepseek_model,
         base_url=settings.deepseek_base_url,
+        thinking=settings.deepseek_thinking,
     )
     wikipedia_http = httpx.AsyncClient(
         timeout=30.0,
@@ -64,19 +71,26 @@ async def _run() -> None:
         llm,
         ToolRegistry(
             default_tools(
-                signal,
+                bot_name,
                 wikipedia,
                 wikipedia_max_section_chars=settings.wikipedia_max_section_chars,
             )
         ),
         max_iterations=settings.max_tool_iterations,
     )
+    lobotomiser = Lobotomiser(
+        state=state,
+        history=history,
+        name_setter=bot_name,
+        default_name=settings.default_display_name,
+    )
     commands = CommandRouter(
         state=state,
         history=history,
         farewell=LlmFarewellWriter(llm, max_chars=settings.reset_farewell_max_chars),
-        name_setter=signal,
-        default_name=settings.default_display_name,
+        name_setter=bot_name,
+        lobotomiser=lobotomiser,
+        timezone=settings.display_tz,
     )
     bot = Bot(
         signal=signal,
@@ -85,11 +99,15 @@ async def _run() -> None:
         commands=commands,
         state=state,
         disclaimers=state,
+        lobotomiser=lobotomiser,
+        name=bot_name,
         system_prompt=settings.load_system_prompt(),
         allowed_group_ids=settings.allowed_group_ids,
         allowed_senders=settings.allowed_senders,
         trigger_alias=settings.trigger_alias,
         error_reply=_ERROR_REPLY,
+        timezone=settings.display_tz,
+        unprompted_reply_chance=settings.unprompted_reply_chance,
     )
 
     log.info(

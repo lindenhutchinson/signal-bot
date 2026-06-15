@@ -76,10 +76,51 @@ async def test_command_log_windows_to_newest_keeping_oldest_first(store: StateSt
 
 async def test_command_log_is_isolated_per_group(store: StateStore) -> None:
     await store.log_command("g1", author_name="A", command="@reset", created_at=1)
-    await store.log_command("g2", author_name="B", command="@clear", created_at=1)
+    await store.log_command("g2", author_name="B", command="@lobotomy", created_at=1)
 
     assert [c.command for c in await store.recent_commands("g1")] == ["@reset"]
-    assert [c.command for c in await store.recent_commands("g2")] == ["@clear"]
+    assert [c.command for c in await store.recent_commands("g2")] == ["@lobotomy"]
+
+
+async def test_suicide_arming_round_trips_and_is_per_group(store: StateStore) -> None:
+    assert await store.is_suicide_armed("g1") is False
+
+    await store.arm_suicide("g1", at=123)
+
+    assert await store.is_suicide_armed("g1") is True
+    assert await store.is_suicide_armed("g2") is False  # isolated per group
+
+
+async def test_arming_is_idempotent(store: StateStore) -> None:
+    await store.arm_suicide("g1", at=1)
+    await store.arm_suicide("g1", at=2)  # re-arming must not blow up on the PK
+
+    assert await store.is_suicide_armed("g1") is True
+
+
+async def test_disarm_suicide_clears_only_the_target_group(store: StateStore) -> None:
+    await store.arm_suicide("g1", at=1)
+    await store.arm_suicide("g2", at=1)
+
+    await store.disarm_suicide("g1")
+
+    assert await store.is_suicide_armed("g1") is False
+    assert await store.is_suicide_armed("g2") is True
+
+
+async def test_arming_persists_across_reconnect(tmp_path: Path) -> None:
+    path = tmp_path / "state.sqlite"
+    s1 = StateStore(path, command_log_window=3)
+    await s1.connect()
+    await s1.arm_suicide("g1", at=1)
+    await s1.aclose()
+
+    s2 = StateStore(path, command_log_window=3)
+    await s2.connect()
+    armed = await s2.is_suicide_armed("g1")
+    await s2.aclose()
+
+    assert armed is True
 
 
 async def test_disclaimers_are_stored_and_returned_newest_first(store: StateStore) -> None:

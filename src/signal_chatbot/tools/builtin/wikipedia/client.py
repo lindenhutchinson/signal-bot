@@ -9,15 +9,26 @@ text locally — no extra request per section.
 
 from __future__ import annotations
 
+import asyncio
 import html
 import re
 from dataclasses import dataclass
 
 import httpx
 
+from signal_chatbot.logging import get_logger
+
+log = get_logger(__name__)
+
 # Wikipedia search snippets come back as HTML with <span class="searchmatch">
 # highlight markup; strip tags and unescape entities for a plain-text snippet.
 _TAG_RE = re.compile(r"<[^>]+>")
+
+# Wikimedia returns 429 when an IP/User-Agent exceeds its rate limit and 503 when
+# the database replica lag exceeds our ``maxlag``. Both are transient and carry a
+# ``Retry-After`` header; back off and retry rather than failing the whole reply.
+_RETRYABLE_STATUS = frozenset({429, 503})
+_MAX_RETRY_DELAY = 30.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,21 +46,43 @@ def _strip_html(text: str) -> str:
 class WikipediaClient:
     """Async client for ``{language}.wikipedia.org/w/api.php``."""
 
-    def __init__(self, http: httpx.AsyncClient, *, language: str = "en"):
+    def __init__(self, http: httpx.AsyncClient, *, language: str = "en", max_retries: int = 3):
         self._http = http
         self._language = language
+        self._max_retries = max_retries
 
     @property
     def _api_url(self) -> str:
         return f"https://{self._language}.wikipedia.org/w/api.php"
 
     async def _query(self, params: dict) -> dict:
-        resp = await self._http.get(
-            self._api_url,
-            params={"format": "json", "formatversion": "2", **params},
-        )
-        resp.raise_for_status()
-        return resp.json()
+        # maxlag asks Wikimedia to reject (with 503 + Retry-After) rather than serve
+        # from a lagging replica; we honour that and 429 throttling with backoff.
+        full = {"format": "json", "formatversion": "2", "maxlag": "5", **params}
+        for attempt in range(self._max_retries + 1):
+            resp = await self._http.get(self._api_url, params=full)
+            if resp.status_code in _RETRYABLE_STATUS and attempt < self._max_retries:
+                delay = self._retry_delay(resp, attempt)
+                log.warning(
+                    "wikipedia.throttled",
+                    status=resp.status_code,
+                    attempt=attempt + 1,
+                    retry_in=delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            resp.raise_for_status()
+            return resp.json()
+        raise AssertionError("unreachable: loop returns or raises on the final attempt")
+
+    @staticmethod
+    def _retry_delay(resp: httpx.Response, attempt: int) -> float:
+        """Seconds to wait before retrying — the ``Retry-After`` header if sane, else
+        exponential backoff, capped."""
+        header = resp.headers.get("Retry-After", "")
+        if header.isdigit():
+            return min(float(header), _MAX_RETRY_DELAY)
+        return min(2.0**attempt, _MAX_RETRY_DELAY)
 
     async def search(self, query: str, *, limit: int) -> list[SearchResult]:
         """Return up to ``limit`` search hits for ``query``, best match first."""

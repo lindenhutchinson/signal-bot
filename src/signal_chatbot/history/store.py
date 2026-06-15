@@ -33,11 +33,6 @@ CREATE TABLE IF NOT EXISTS messages (
     timestamp INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_group ON messages (group_id, id);
-
-CREATE TABLE IF NOT EXISTS history_floors (
-    group_id TEXT    PRIMARY KEY,
-    floor_id INTEGER NOT NULL
-);
 """
 
 
@@ -72,38 +67,21 @@ class HistoryStore:
         await self._conn.commit()
 
     async def recent(self, group_id: str) -> list[StoredMessage]:
-        """Return up to ``window_max`` newest messages for a group, oldest first.
-
-        Messages at or before the group's window floor (set by ``set_floor``, e.g. on
-        ``@reset``) are excluded, so a fresh generation does not see the old conversation.
-        """
+        """Return up to ``window_max`` newest messages for a group, oldest first."""
         cursor = await self._conn.execute(
             """
             SELECT sender, text, timestamp FROM (
                 SELECT id, sender, text, timestamp
                 FROM messages
                 WHERE group_id = ?
-                  AND id > COALESCE((SELECT floor_id FROM history_floors WHERE group_id = ?), 0)
                 ORDER BY id DESC
                 LIMIT ?
             ) ORDER BY id ASC
             """,
-            (group_id, group_id, self._window_max),
+            (group_id, self._window_max),
         )
         rows = await cursor.fetchall()
         return [StoredMessage(r["sender"], r["text"], r["timestamp"]) for r in rows]
-
-    async def set_floor(self, group_id: str) -> None:
-        """Anchor the window start to now: exclude all messages up to the latest one."""
-        await self._conn.execute(
-            """
-            INSERT INTO history_floors (group_id, floor_id)
-            VALUES (?, (SELECT COALESCE(MAX(id), 0) FROM messages WHERE group_id = ?))
-            ON CONFLICT(group_id) DO UPDATE SET floor_id = excluded.floor_id
-            """,
-            (group_id, group_id),
-        )
-        await self._conn.commit()
 
     async def clear(self, group_id: str) -> None:
         """Delete all stored messages for a group (the bot windows fresh from here)."""

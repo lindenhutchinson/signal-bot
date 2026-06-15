@@ -15,9 +15,12 @@ from openai import AsyncOpenAI
 class DeepSeekClient:
     """Issues chat completions against DeepSeek."""
 
-    def __init__(self, api_key: str, model: str, base_url: str):
+    def __init__(self, api_key: str, model: str, base_url: str, *, thinking: bool = False):
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._model = model
+        # deepseek-v4-* default to thinking mode; send the toggle explicitly so the
+        # behaviour doesn't depend on the (defaulting-to-enabled) server default.
+        self._thinking_body = {"thinking": {"type": "enabled" if thinking else "disabled"}}
 
     async def complete(
         self,
@@ -31,6 +34,7 @@ class DeepSeekClient:
             messages=messages,
             tools=tools if tools else _NOT_GIVEN,
             response_format=response_format if response_format else _NOT_GIVEN,
+            extra_body=self._thinking_body,
         )
 
     async def aclose(self) -> None:
