@@ -23,7 +23,9 @@ from signal_chatbot.lobotomy import Lobotomiser
 from signal_chatbot.logging import configure_logging, get_logger
 from signal_chatbot.state import Database
 from signal_chatbot.tools import ToolRegistry
+from signal_chatbot.tools.base import Tool
 from signal_chatbot.tools.builtin import default_tools
+from signal_chatbot.tools.builtin.websearch import TavilyClient, WebSearch
 from signal_chatbot.tools.builtin.wikipedia import (
     WikipediaCache,
     WikipediaClient,
@@ -67,6 +69,19 @@ async def _run() -> None:
         ttl_seconds=settings.wikipedia_cache_ttl_seconds,
         search_limit=settings.wikipedia_search_limit,
     )
+    websearch_http: httpx.AsyncClient | None = None
+    web_search: Tool | None = None
+    if settings.tavily_api_key:
+        websearch_http = httpx.AsyncClient(timeout=30.0)
+        web_search = WebSearch(
+            TavilyClient(
+                websearch_http,
+                settings.tavily_api_key,
+                result_limit=settings.websearch_result_limit,
+            ),
+            snippet_max_chars=settings.websearch_snippet_max_chars,
+        )
+    log.info("websearch.configured", enabled=web_search is not None)
     conversation = Conversation(
         llm,
         ToolRegistry(
@@ -75,6 +90,7 @@ async def _run() -> None:
                 db.directives,
                 wikipedia,
                 wikipedia_max_section_chars=settings.wikipedia_max_section_chars,
+                web_search=web_search,
             )
         ),
         max_iterations=settings.max_tool_iterations,
@@ -134,6 +150,8 @@ async def _run() -> None:
         await db.aclose()
         await wikipedia_cache.aclose()
         await wikipedia_http.aclose()
+        if websearch_http is not None:
+            await websearch_http.aclose()
 
 
 async def _list_groups() -> None:

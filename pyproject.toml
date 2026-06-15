@@ -39,6 +39,9 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+# The harness keeps scratch state (incl. git worktrees holding other branches'
+# copies of the source) under .claude/; never lint it.
+extend-exclude = [".claude"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC", "SIM"]

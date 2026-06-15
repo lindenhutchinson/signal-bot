@@ -19,19 +19,25 @@ def default_tools(
     wikipedia: WikipediaService,
     *,
     wikipedia_max_section_chars: int,
+    web_search: Tool | None = None,
 ) -> list[Tool]:
     """The tools registered by default at startup.
 
     ``name`` is the bot's name handle: a :class:`ProfileNameSetter` for ``set_name``
     and a :class:`NameSource` for the authoring tools (one ``BotName`` satisfies both).
+    ``web_search`` is included only when configured (a Tavily key is set); otherwise
+    the bot simply lacks that ability.
     """
-    return [
+    tools: list[Tool] = [
         CurrentTime(),
         SetName(name),
         AddRule(directives, name),
         AddLore(directives, name),
         *wikipedia_tools(wikipedia, max_section_chars=wikipedia_max_section_chars),
     ]
+    if web_search is not None:
+        tools.append(web_search)
+    return tools
 
 
 __all__ = ["default_tools", "CurrentTime", "SetName", "AddRule", "AddLore"]

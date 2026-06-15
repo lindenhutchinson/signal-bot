@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     wikipedia_max_section_chars: int = 2000
     wikipedia_user_agent: str = "signal-chatbot/0.1 (contact: you@example.com)"
 
+    # Web search (Tavily)
+    tavily_api_key: str = ""  # empty = web search disabled
+    websearch_result_limit: int = 5
+    websearch_snippet_max_chars: int = 500
+
     @field_validator("allowed_group_ids", "allowed_senders", mode="before")
     @classmethod
     def _split_csv(cls, value: object) -> object:

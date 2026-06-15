@@ -21,10 +21,35 @@ async def directives(tmp_path: Path):
     await db.aclose()
 
 
+def _names(tools) -> set[str]:
+    return {d["function"]["name"] for d in ToolRegistry(tools).definitions()}
+
+
 async def test_default_tools_registers_authoring_tools(directives) -> None:
     name = BotName(FakeNameSetter(), initial="Bot")
     tools = default_tools(name, directives, None, wikipedia_max_section_chars=100)  # type: ignore[arg-type]
 
-    registered = {d["function"]["name"] for d in ToolRegistry(tools).definitions()}
+    assert {"add_rule", "add_lore", "set_name"} <= _names(tools)
 
-    assert {"add_rule", "add_lore", "set_name"} <= registered
+
+async def test_web_search_included_only_when_provided(directives) -> None:
+    name = BotName(FakeNameSetter(), initial="Bot")
+
+    without = default_tools(name, directives, None, wikipedia_max_section_chars=100)  # type: ignore[arg-type]
+    assert "web_search" not in _names(without)
+
+    class _StubWebSearch:
+        name = "web_search"
+        description = "stub"
+
+        def definition(self) -> dict:
+            return {"type": "function", "function": {"name": "web_search", "parameters": {}}}
+
+    with_search = default_tools(
+        name,
+        directives,
+        None,  # type: ignore[arg-type]
+        wikipedia_max_section_chars=100,
+        web_search=_StubWebSearch(),  # type: ignore[arg-type]
+    )
+    assert "web_search" in _names(with_search)
