@@ -26,6 +26,17 @@ from signal_chatbot.tools import ToolContext, ToolRegistry
 log = get_logger(__name__)
 
 
+def _reply_to_index(raw: Any) -> int | None:
+    """Coerce a ``final_answer`` ``reply_to`` to a usable 1-based index, else ``None``.
+
+    Only a positive integer is a valid quote target; anything else (missing, non-int,
+    zero/negative, a bool) is treated as "no quote" so a sloppy value never throws.
+    """
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        return None
+    return raw if raw > 0 else None
+
+
 class CompletionClient(Protocol):
     """The slice of :class:`DeepSeekClient` the loop depends on (eases testing)."""
 
@@ -120,6 +131,7 @@ class Conversation:
             ethical_disclaimer=_clean(final.get("ethical_disclaimer")),
             tool_footer=_tool_footer(used),
             announcements=announcements,
+            reply_to_index=_reply_to_index(final.get("reply_to")),
             attempted_self_destruct=attempted,
         )
 

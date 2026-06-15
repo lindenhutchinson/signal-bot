@@ -180,6 +180,39 @@ async def test_final_answer_tool_call_delivers_message_and_disclaimer() -> None:
     assert len(client.calls) == 1  # single call, no JSON mode
 
 
+def _final_with_reply_to(reply_to):
+    args = {"message": "quoting you", "reply_to": reply_to}
+    return _completion(_message(tool_calls=[_tool_call("f1", FINAL_ANSWER_NAME, args)]))
+
+
+async def test_final_answer_reply_to_sets_reply_to_index() -> None:
+    client = FakeClient([_final_with_reply_to(2)])
+    convo = Conversation(client, ToolRegistry(), max_iterations=3)
+
+    reply = await convo.respond([{"role": "user", "content": "x"}], CTX)
+
+    assert reply.reply_to_index == 2
+
+
+async def test_final_answer_without_reply_to_leaves_index_none() -> None:
+    client = FakeClient([_final("no quote")])
+    convo = Conversation(client, ToolRegistry(), max_iterations=3)
+
+    reply = await convo.respond([{"role": "user", "content": "x"}], CTX)
+
+    assert reply.reply_to_index is None
+
+
+async def test_invalid_reply_to_is_coerced_to_none() -> None:
+    for bad in (0, -1, "2", 1.5, True):
+        client = FakeClient([_final_with_reply_to(bad)])
+        convo = Conversation(client, ToolRegistry(), max_iterations=3)
+
+        reply = await convo.respond([{"role": "user", "content": "x"}], CTX)
+
+        assert reply.reply_to_index is None, f"expected None for reply_to={bad!r}"
+
+
 async def test_info_tool_then_final_answer() -> None:
     client = FakeClient(
         [

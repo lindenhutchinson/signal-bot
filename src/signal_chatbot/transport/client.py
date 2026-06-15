@@ -75,14 +75,22 @@ class SignalClient:
 
     async def send(self, message: OutgoingMessage) -> None:
         """Send a text message to a group via the REST bridge."""
-        resp = await self._http.post(
-            "/v2/send",
-            json={
-                "number": self._bot_number,
-                "message": message.text,
-                "recipients": [message.group_id],
-            },
-        )
+        body: dict = {
+            "number": self._bot_number,
+            "message": message.text,
+            "recipients": [message.group_id],
+        }
+        # Only attach the quote when the full trio is present — the bridge needs all
+        # three to render a reply, and a partial quote would be silently dropped anyway.
+        if (
+            message.quote_timestamp is not None
+            and message.quote_author is not None
+            and message.quote_message is not None
+        ):
+            body["quote_timestamp"] = message.quote_timestamp
+            body["quote_author"] = message.quote_author
+            body["quote_message"] = message.quote_message
+        resp = await self._http.post("/v2/send", json=body)
         resp.raise_for_status()
 
     async def set_profile_name(self, name: str) -> None:

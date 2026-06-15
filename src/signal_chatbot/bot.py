@@ -12,12 +12,13 @@ import asyncio
 import random
 from collections import defaultdict
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import tzinfo
 from typing import Protocol
 
 from signal_chatbot.commands.parser import Command, parse
 from signal_chatbot.history import HistoryStore
-from signal_chatbot.llm.prompt import BOT_SENDER, build_messages
+from signal_chatbot.llm.prompt import BOT_SENDER, build_messages, quotable_history
 from signal_chatbot.llm.reply import BotReply
 from signal_chatbot.lobotomy import Lobotomiser
 from signal_chatbot.logging import get_logger
@@ -193,6 +194,7 @@ class Bot:
             sender=message.sender_name,
             text=message.text,
             timestamp=message.timestamp,
+            sender_number=message.sender_number,
         )
 
         triggered = self._trigger in message.text.lower()
@@ -249,8 +251,21 @@ class Bot:
         # turns and learn to fake them. Both are suppressed on the error-reply fallback.
         warning = self._self_destruct_warning() if reply.attempted_self_destruct else ""
         sent = warning + text + reply.tool_footer if has_message else text
-        await self._signal.send(OutgoingMessage(group_id=group_id, text=sent))
-        await self._history.append(group_id, sender=BOT_SENDER, text=text, timestamp=timestamp)
+        # Quoting applies only to the main reply: announcements and the
+        # self-lobotomy/error paths are sent unquoted.
+        quote = self._resolve_quote(history, reply.reply_to_index) if has_message else None
+        outgoing = OutgoingMessage(group_id=group_id, text=sent)
+        if quote is not None:
+            outgoing = replace(
+                outgoing,
+                quote_timestamp=quote.timestamp,
+                quote_author=quote.sender_number,
+                quote_message=quote.text,
+            )
+        await self._signal.send(outgoing)
+        await self._history.append(
+            group_id, sender=BOT_SENDER, text=text, timestamp=timestamp, sender_number=""
+        )
 
         # Tool-produced announcements are public, sent as their own messages AFTER the
         # main reply, and (like the footer) kept OUT of history so the model can't fake them.
@@ -262,6 +277,20 @@ class Bot:
         if reply.attempted_self_destruct:
             await self._arming.arm_suicide(group_id, at=timestamp)
             log.info("bot.self_destruct_armed", group=group_id)
+
+    @staticmethod
+    def _resolve_quote(history: list, index: int | None):
+        """Map the model's 1-based ``[#N]`` to the message it quotes, or ``None``.
+
+        ``index`` is resolved against ``quotable_history`` (non-bot turns only), the same
+        list the prompt numbers. Out-of-range or missing → no quote (silently).
+        """
+        if index is None:
+            return None
+        quotable = quotable_history(history)
+        if 1 <= index <= len(quotable):
+            return quotable[index - 1]
+        return None
 
     def _self_destruct_warning(self) -> str:
         return _SELF_DESTRUCT_WARNING.format(name=self._name.current)

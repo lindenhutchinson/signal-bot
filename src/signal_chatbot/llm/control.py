@@ -36,6 +36,10 @@ class _FinalAnswerArgs(BaseModel):
             "is plainly sincere."
         ),
     )
+    reply_to: int | None = Field(
+        default=None,
+        description="The [#N] number of the message you're quoting in reply, or omit to not quote.",
+    )
 
 
 _FINAL_ANSWER_DEF = {

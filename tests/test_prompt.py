@@ -1,7 +1,7 @@
 from zoneinfo import ZoneInfo
 
 from signal_chatbot.history import StoredMessage
-from signal_chatbot.llm.prompt import BOT_SENDER, build_messages
+from signal_chatbot.llm.prompt import BOT_SENDER, build_messages, quotable_history
 from signal_chatbot.state import Directive, DirectiveSet, LoggedCommand, Profile
 
 SYDNEY = ZoneInfo("Australia/Sydney")
@@ -93,7 +93,7 @@ def test_human_messages_are_user_role_labelled_by_sender_and_timestamped() -> No
 
     messages = build_messages("sys", history, timezone=SYDNEY)
 
-    assert messages[1] == {"role": "user", "content": "[2026-06-13 00:32 AEST] Alice: hello"}
+    assert messages[1] == {"role": "user", "content": "[#1] [2026-06-13 00:32 AEST] Alice: hello"}
 
 
 def test_bot_messages_map_to_assistant_role_unstamped_and_unlabelled() -> None:
@@ -105,6 +105,44 @@ def test_bot_messages_map_to_assistant_role_unstamped_and_unlabelled() -> None:
     messages = build_messages("sys", history, timezone=SYDNEY)
 
     # User turns keep the [timestamp] for context; the bot's own turns are replayed
-    # exactly as sent (no stamp) so it doesn't learn to echo the date into its replies.
-    assert messages[1] == {"role": "user", "content": "[2026-06-13 00:32 AEST] Alice: hi @bot"}
+    # exactly as sent (no stamp, no [#N]) so it doesn't learn to echo the date or the
+    # quote marker into its replies.
+    assert messages[1] == {
+        "role": "user",
+        "content": "[#1] [2026-06-13 00:32 AEST] Alice: hi @bot",
+    }
     assert messages[2] == {"role": "assistant", "content": "Hello Alice!"}
+
+
+def test_quote_numbering_counts_only_non_bot_turns() -> None:
+    history = [
+        StoredMessage(sender="Alice", text="first", timestamp=1781274720000),
+        StoredMessage(sender=BOT_SENDER, text="bot reply", timestamp=1781274720000),
+        StoredMessage(sender="Bob", text="second", timestamp=1781274720000),
+    ]
+
+    messages = build_messages("sys", history, timezone=SYDNEY)
+
+    # [#N] skips the bot turn entirely: Alice is #1, Bob is #2, matching quotable_history.
+    assert messages[1]["content"].startswith("[#1] ")
+    assert messages[2] == {"role": "assistant", "content": "bot reply"}
+    assert messages[3]["content"].startswith("[#2] ")
+
+
+def test_quotable_history_returns_only_non_bot_messages_in_order() -> None:
+    history = [
+        StoredMessage(sender="Alice", text="first", timestamp=1),
+        StoredMessage(sender=BOT_SENDER, text="bot reply", timestamp=2),
+        StoredMessage(sender="Bob", text="second", timestamp=3),
+    ]
+
+    quotable = quotable_history(history)
+
+    assert [m.text for m in quotable] == ["first", "second"]
+
+
+def test_quote_format_instruction_is_in_the_system_message() -> None:
+    system = build_messages("BASE", [], timezone=SYDNEY)[0]["content"]
+
+    assert "## Quoting an earlier message" in system
+    assert "reply_to" in system

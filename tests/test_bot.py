@@ -45,6 +45,7 @@ class FakeConversation:
         attempted_self_destruct: bool = False,
         self_lobotomy: bool = False,
         announcements: list[str] | None = None,
+        reply_to_index: int | None = None,
     ) -> None:
         self.reply = reply
         self.disclaimer = disclaimer
@@ -53,6 +54,7 @@ class FakeConversation:
         self.attempted = attempted_self_destruct
         self.self_lobotomy = self_lobotomy
         self.announcements = announcements or []
+        self.reply_to_index = reply_to_index
         self.seen: list[list[dict]] = []
         self.seen_armed: list[bool] = []
         self.seen_ctx: list = []
@@ -68,6 +70,7 @@ class FakeConversation:
             ethical_disclaimer=self.disclaimer,
             tool_footer=self.footer,
             announcements=list(self.announcements),
+            reply_to_index=self.reply_to_index,
             attempted_self_destruct=self.attempted,
             self_lobotomy=self.self_lobotomy,
         )
@@ -305,6 +308,51 @@ async def test_announcements_are_sent_as_their_own_messages_after_the_reply(hist
     assert [m.text for m in signal.sent] == ["here you go", "📢 a rule", "📜 some lore"]
     # ...but announcements are kept OUT of history (only the core reply is stored)
     assert [m.text for m in await history.recent(GROUP)] == ["@bot do it", "here you go"]
+
+
+async def test_reply_with_reply_to_index_quotes_the_matching_message(history) -> None:
+    signal = FakeSignal()
+    convo = FakeConversation(reply="quoting you", reply_to_index=1)
+    bot = make_bot(history, signal, convo)
+
+    # Seed a prior (quotable) human message; it becomes [#1] in quotable_history.
+    await history.append(
+        GROUP, sender="Bob", text="the earlier message", timestamp=42, sender_number="+61400000099"
+    )
+
+    await bot.handle(message("@bot reply to bob"))
+
+    # The triggering message is also quotable, so the window is [Bob, Alice's @bot] —
+    # reply_to_index=1 points at Bob's message.
+    out = signal.sent[0]
+    assert out.text == "quoting you"
+    assert out.quote_timestamp == 42
+    assert out.quote_author == "+61400000099"
+    assert out.quote_message == "the earlier message"
+
+
+async def test_reply_with_out_of_range_index_sends_no_quote(history) -> None:
+    signal = FakeSignal()
+    convo = FakeConversation(reply="oops wrong number", reply_to_index=99)
+    bot = make_bot(history, signal, convo)
+
+    await bot.handle(message("@bot hi"))
+
+    out = signal.sent[0]
+    assert out.text == "oops wrong number"
+    assert out.quote_timestamp is None
+    assert out.quote_author is None
+    assert out.quote_message is None
+
+
+async def test_reply_without_reply_to_index_sends_no_quote(history) -> None:
+    signal = FakeSignal()
+    convo = FakeConversation(reply="just a reply")
+    bot = make_bot(history, signal, convo)
+
+    await bot.handle(message("@bot hi"))
+
+    assert signal.sent[0].quote_timestamp is None
 
 
 async def test_tool_footer_suppressed_on_error_fallback(history) -> None:

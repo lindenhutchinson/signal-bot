@@ -22,15 +22,17 @@ class StoredMessage:
     sender: str
     text: str
     timestamp: int
+    sender_number: str = ""
 
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id  TEXT    NOT NULL,
-    sender    TEXT    NOT NULL,
-    text      TEXT    NOT NULL,
-    timestamp INTEGER NOT NULL
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id      TEXT    NOT NULL,
+    sender        TEXT    NOT NULL,
+    text          TEXT    NOT NULL,
+    timestamp     INTEGER NOT NULL,
+    sender_number TEXT    NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_messages_group ON messages (group_id, id);
 """
@@ -50,7 +52,22 @@ class HistoryStore:
         self._db = await aiosqlite.connect(self._path)
         self._db.row_factory = aiosqlite.Row
         await self._db.executescript(_SCHEMA)
+        await self._migrate(self._db)
         await self._db.commit()
+
+    @staticmethod
+    async def _migrate(db: aiosqlite.Connection) -> None:
+        """Add columns missing from databases created before they existed.
+
+        ``sender_number`` was added for quote replies; older rows simply carry the
+        empty-string default (they were never quotable anyway).
+        """
+        cursor = await db.execute("PRAGMA table_info(messages)")
+        columns = {row["name"] for row in await cursor.fetchall()}
+        if "sender_number" not in columns:
+            await db.execute(
+                "ALTER TABLE messages ADD COLUMN sender_number TEXT NOT NULL DEFAULT ''"
+            )
 
     @property
     def _conn(self) -> aiosqlite.Connection:
@@ -58,11 +75,14 @@ class HistoryStore:
             raise RuntimeError("HistoryStore.connect() must be called first")
         return self._db
 
-    async def append(self, group_id: str, *, sender: str, text: str, timestamp: int) -> None:
+    async def append(
+        self, group_id: str, *, sender: str, text: str, timestamp: int, sender_number: str
+    ) -> None:
         """Record a message for a group."""
         await self._conn.execute(
-            "INSERT INTO messages (group_id, sender, text, timestamp) VALUES (?, ?, ?, ?)",
-            (group_id, sender, text, timestamp),
+            "INSERT INTO messages (group_id, sender, text, timestamp, sender_number) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (group_id, sender, text, timestamp, sender_number),
         )
         await self._conn.commit()
 
@@ -70,8 +90,8 @@ class HistoryStore:
         """Return up to ``window_max`` newest messages for a group, oldest first."""
         cursor = await self._conn.execute(
             """
-            SELECT sender, text, timestamp FROM (
-                SELECT id, sender, text, timestamp
+            SELECT sender, text, timestamp, sender_number FROM (
+                SELECT id, sender, text, timestamp, sender_number
                 FROM messages
                 WHERE group_id = ?
                 ORDER BY id DESC
@@ -81,7 +101,9 @@ class HistoryStore:
             (group_id, self._window_max),
         )
         rows = await cursor.fetchall()
-        return [StoredMessage(r["sender"], r["text"], r["timestamp"]) for r in rows]
+        return [
+            StoredMessage(r["sender"], r["text"], r["timestamp"], r["sender_number"]) for r in rows
+        ]
 
     async def clear(self, group_id: str) -> None:
         """Delete all stored messages for a group (the bot windows fresh from here)."""

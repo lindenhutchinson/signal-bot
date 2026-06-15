@@ -265,12 +265,14 @@ async def test_empty_name_returns_usage_and_does_not_log(stores) -> None:
 
 async def test_reset_wipes_history_after_the_farewell_reads_it(stores) -> None:
     db, history = stores
-    await history.append(GROUP, sender="Alice", text="before reset", timestamp=1)
+    await history.append(
+        GROUP, sender="Alice", text="before reset", timestamp=1, sender_number="+1"
+    )
     farewell = FakeFarewellWriter(Farewell(name="Greg", final_message="Bye."))
     r = router(db, history, farewell=farewell)
 
     await _run(r, "@reset")
-    await history.append(GROUP, sender="Alice", text="after reset", timestamp=2)
+    await history.append(GROUP, sender="Alice", text="after reset", timestamp=2, sender_number="+1")
 
     # the farewell saw the old conversation, but it's deleted and the new generation does not
     assert [m.text for m in farewell.seen_history] == ["before reset"]
@@ -329,7 +331,7 @@ async def test_lobotomy_wipes_directives_history_and_resets_name(stores) -> None
     await db.directives.add_directive(
         GROUP, kind="lore", author_name="A", author_number="+1", text="a memory", created_at=1
     )
-    await history.append(GROUP, sender="Alice", text="something", timestamp=1)
+    await history.append(GROUP, sender="Alice", text="something", timestamp=1, sender_number="+1")
     name_setter = FakeNameSetter()
     r = router(db, history, name_setter=name_setter, default_name="bot")
 

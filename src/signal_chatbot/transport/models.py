@@ -70,7 +70,15 @@ class IncomingMessage:
 
 @dataclass(frozen=True, slots=True)
 class OutgoingMessage:
-    """A text message to send back to a Signal group."""
+    """A text message to send back to a Signal group.
+
+    The optional ``quote_*`` trio identifies an earlier message this one replies to.
+    They are sent only as a complete set (all three present); a partial quote is
+    meaningless to the bridge.
+    """
 
     group_id: str
     text: str
+    quote_timestamp: int | None = None
+    quote_author: str | None = None
+    quote_message: str | None = None

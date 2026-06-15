@@ -21,6 +21,10 @@ class BotReply:
     mechanism). Each is sent as its own message and, like the footer, kept OUT of
     history so the model can't learn to fake them.
 
+    ``reply_to_index`` is the 1-based ``[#N]`` the model chose to quote (over the
+    quotable, non-bot history window); the bot resolves it to a Signal quote on the main
+    reply. ``None`` means no quote.
+
     ``attempted_self_destruct`` is set when the model called ``attempt_kill_self`` this
     turn (the bot should then be armed). ``self_lobotomy`` is set when it called
     ``confirm_kill_self`` while armed — ``message`` then carries its final words and the
@@ -31,5 +35,6 @@ class BotReply:
     ethical_disclaimer: str = ""
     tool_footer: str = ""
     announcements: list[str] = field(default_factory=list)
+    reply_to_index: int | None = None
     attempted_self_destruct: bool = False
     self_lobotomy: bool = False
