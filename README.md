@@ -36,8 +36,11 @@ Commands must be the **start** of the message; the `@bot` trigger is unaffected.
 @rulelist       List active rules.
 @lorelist       List active lore.
 @disclaimers    Show the asides the bot attached to its messages.
-@reset          Wipe rules, lore & history. The bot leaves a parting note.
+@profiles       Show what the bot remembers about people.
+@forget [name]  Make the bot forget everyone, or just one person.
+@reset          Wipe rules, lore, history, disclaimers & profiles. Parting note.
 @lobotomy       Nuke EVERYTHING: rules, lore, history & name. No goodbye.
+@info           Explain @help and list every tool the bot can use.
 @help           Show this message.
 ```
 
@@ -57,6 +60,18 @@ Commands must be the **start** of the message; the `@bot` trigger is unaffected.
   state has been churning without exposing the contents.
 - The bot can **rename itself** mid-conversation via a `set_name` tool, and `@reset`
   renames it to the new generation's chosen name.
+- The bot can **author its own rules and lore** (`add_rule` / `add_lore` tools); each
+  addition is announced to the group as its own message.
+- The bot keeps **per-sender profiles** — private notes about people it learns over time
+  (`remember_about_user` tool), injected back into the prompt. Cleared by
+  `@forget`/`@reset`/`@lobotomy`.
+
+### Tools the bot can call
+
+Beyond shaping its own state, the bot has **info tools** it calls mid-reply: the current
+time, **Wikipedia** search/article, and — when `TAVILY_API_KEY` is set — **web search**
+(short, untrusted external snippets, length-capped). It can also **quote-reply** to a
+specific earlier message. `@info` lists the live tool set.
 
 ### The bot can end itself
 
