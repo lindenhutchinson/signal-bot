@@ -6,16 +6,19 @@ returned by :func:`default_tools`. Nothing else needs wiring.
 
 from signal_chatbot.botname import BotName
 from signal_chatbot.state.directives import DirectiveStore
+from signal_chatbot.state.profiles import ProfileStore
 from signal_chatbot.tools.base import Tool
 from signal_chatbot.tools.builtin.authoring import AddLore, AddRule
 from signal_chatbot.tools.builtin.clock import CurrentTime
 from signal_chatbot.tools.builtin.identity import SetName
+from signal_chatbot.tools.builtin.profiles import RememberAboutUser
 from signal_chatbot.tools.builtin.wikipedia import WikipediaService, wikipedia_tools
 
 
 def default_tools(
     name: BotName,
     directives: DirectiveStore,
+    profiles: ProfileStore,
     wikipedia: WikipediaService,
     *,
     wikipedia_max_section_chars: int,
@@ -33,6 +36,7 @@ def default_tools(
         SetName(name),
         AddRule(directives, name),
         AddLore(directives, name),
+        RememberAboutUser(profiles),
         *wikipedia_tools(wikipedia, max_section_chars=wikipedia_max_section_chars),
     ]
     if web_search is not None:
@@ -40,4 +44,4 @@ def default_tools(
     return tools
 
 
-__all__ = ["default_tools", "CurrentTime", "SetName", "AddRule", "AddLore"]
+__all__ = ["default_tools", "CurrentTime", "SetName", "AddRule", "AddLore", "RememberAboutUser"]

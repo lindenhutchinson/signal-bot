@@ -21,7 +21,7 @@ from signal_chatbot.llm.prompt import BOT_SENDER, build_messages
 from signal_chatbot.llm.reply import BotReply
 from signal_chatbot.lobotomy import Lobotomiser
 from signal_chatbot.logging import get_logger
-from signal_chatbot.state import DirectiveSet, LoggedCommand
+from signal_chatbot.state import DirectiveSet, LoggedCommand, Profile
 from signal_chatbot.tools import ToolContext
 from signal_chatbot.transport.models import IncomingMessage, OutgoingMessage
 
@@ -96,6 +96,12 @@ class DisclaimerLog(Protocol):
     ) -> None: ...
 
 
+class Profiles(Protocol):
+    """Read-only view of the per-subject notes the bot keeps (satisfied by ProfileStore)."""
+
+    async def all(self, group_id: str) -> list[Profile]: ...
+
+
 class NameSource(Protocol):
     """Read-only view of the bot's current display name (satisfied by BotName)."""
 
@@ -117,6 +123,7 @@ class Bot:
         command_log: CommandActivity,
         arming: Arming,
         disclaimers: DisclaimerLog,
+        profiles: Profiles,
         lobotomiser: Lobotomiser,
         name: NameSource,
         system_prompt: str,
@@ -136,6 +143,7 @@ class Bot:
         self._command_log = command_log
         self._arming = arming
         self._disclaimers = disclaimers
+        self._profiles = profiles
         self._lobotomiser = lobotomiser
         self._name = name
         self._system_prompt = system_prompt
@@ -209,12 +217,14 @@ class Bot:
             history = await self._history.recent(group_id)
             directives = await self._directives.directives(group_id)
             command_log = await self._command_log.recent_commands(group_id)
+            profiles = await self._profiles.all(group_id)
             messages = build_messages(
                 self._system_prompt,
                 history,
                 timezone=self._timezone,
                 directives=directives,
                 command_log=command_log,
+                profiles=profiles,
             )
             if unprompted:
                 messages.append({"role": "user", "content": _UNPROMPTED_NUDGE})

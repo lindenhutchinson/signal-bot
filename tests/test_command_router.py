@@ -141,6 +141,64 @@ async def test_disclaimers_empty(stores) -> None:
     assert await _run(r, "@disclaimers") == "No disclaimers yet."
 
 
+async def test_profiles_lists_what_the_bot_remembers(stores) -> None:
+    db, history = stores
+    await db.profiles.add_note(GROUP, subject="Dave", note="fears geese", created_at=1)
+    r = router(db, history)
+
+    out = await _run(r, "@profiles")
+
+    assert out.startswith("Profiles:")
+    assert "Dave:" in out and "fears geese" in out
+    # a query, so nothing is logged
+    assert await db.commands.recent_commands(GROUP) == []
+
+
+async def test_profiles_empty(stores) -> None:
+    db, history = stores
+    r = router(db, history)
+
+    assert await _run(r, "@profiles") == "No profiles yet."
+
+
+async def test_forget_one_drops_that_subject_and_is_logged(stores) -> None:
+    db, history = stores
+    await db.profiles.add_note(GROUP, subject="Dave", note="fears geese", created_at=1)
+    await db.profiles.add_note(GROUP, subject="Alice", note="loves cats", created_at=2)
+    r = router(db, history)
+
+    out = await _run(r, "@forget Dave")
+
+    assert out == replies.forgot_one("Dave")
+    assert [p.subject for p in await db.profiles.all(GROUP)] == ["Alice"]
+    assert [c.command for c in await db.commands.recent_commands(GROUP)] == ["@forget"]
+
+
+async def test_forget_unknown_subject_reports_no_match_but_still_logs(stores) -> None:
+    db, history = stores
+    await db.profiles.add_note(GROUP, subject="Dave", note="fears geese", created_at=1)
+    r = router(db, history)
+
+    out = await _run(r, "@forget Nobody")
+
+    assert out == replies.no_such_profile("Nobody")
+    assert [p.subject for p in await db.profiles.all(GROUP)] == ["Dave"]
+    assert [c.command for c in await db.commands.recent_commands(GROUP)] == ["@forget"]
+
+
+async def test_forget_with_no_name_clears_all_profiles_and_logs(stores) -> None:
+    db, history = stores
+    await db.profiles.add_note(GROUP, subject="Dave", note="fears geese", created_at=1)
+    await db.profiles.add_note(GROUP, subject="Alice", note="loves cats", created_at=2)
+    r = router(db, history)
+
+    out = await _run(r, "@forget")
+
+    assert out == replies.FORGOT_ALL
+    assert await db.profiles.all(GROUP) == []
+    assert [c.command for c in await db.commands.recent_commands(GROUP)] == ["@forget"]
+
+
 async def test_help_returns_help_text(stores) -> None:
     db, history = stores
     r = router(db, history)

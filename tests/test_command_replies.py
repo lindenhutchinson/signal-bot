@@ -1,7 +1,7 @@
 from zoneinfo import ZoneInfo
 
 from signal_chatbot.commands import replies
-from signal_chatbot.state import Directive, Disclaimer
+from signal_chatbot.state import Directive, Disclaimer, Profile
 
 SYDNEY = ZoneInfo("Australia/Sydney")
 
@@ -50,6 +50,33 @@ def test_format_disclaimers_empty() -> None:
     assert replies.format_disclaimers([], tz=SYDNEY) == "No disclaimers yet."
 
 
+def test_format_profiles_empty() -> None:
+    assert replies.format_profiles([]) == "No profiles yet."
+
+
+def test_format_profiles_lists_subjects_with_bulleted_notes() -> None:
+    profiles = [
+        Profile(subject="Dave", notes=["fears geese", "owns a boat"]),
+        Profile(subject="Alice", notes=["loves cats"]),
+    ]
+
+    out = replies.format_profiles(profiles)
+
+    assert out == (
+        "Profiles:\n"
+        "Dave:\n"
+        "  - fears geese\n"
+        "  - owns a boat\n"
+        "Alice:\n"
+        "  - loves cats"
+    )
+
+
+def test_forget_replies() -> None:
+    assert replies.forgot_one("Dave") == "Forgotten everything about Dave. 🧽"
+    assert replies.no_such_profile("Dave") == "I don't have anything on Dave."
+
+
 def test_help_text_lists_every_command() -> None:
     for token in (
         "@rule",
@@ -58,6 +85,8 @@ def test_help_text_lists_every_command() -> None:
         "@rulelist",
         "@lorelist",
         "@disclaimers",
+        "@profiles",
+        "@forget",
         "@reset",
         "@lobotomy",
         "@help",

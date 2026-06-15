@@ -19,6 +19,8 @@ class CommandName(StrEnum):
     RULELIST = "rulelist"
     LORELIST = "lorelist"
     DISCLAIMERS = "disclaimers"
+    PROFILES = "profiles"
+    FORGET = "forget"
     RESET = "reset"
     LOBOTOMY = "lobotomy"
     HELP = "help"

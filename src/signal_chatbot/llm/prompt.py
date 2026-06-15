@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import tzinfo
 
 from signal_chatbot.history import StoredMessage
-from signal_chatbot.state import DirectiveSet, LoggedCommand
+from signal_chatbot.state import DirectiveSet, LoggedCommand, Profile
 from signal_chatbot.timefmt import format_timestamp, strip_leading_timestamp
 
 # Sentinel sender used to record the bot's own replies in history, so they can
@@ -69,6 +69,11 @@ _ACTIVITY_HEADER = (
     "You can see THAT these happened, not their contents. Infer the mood — who's been "
     "tinkering, who keeps resetting you — and let it colour you. Don't recite this."
 )
+_PROFILES_HEADER = (
+    "## What you know about people\n"
+    "Your own private notes on people in this group — things you've chosen to remember. "
+    "Let them inform how you treat each person; don't read them out."
+)
 
 
 def build_messages(
@@ -78,6 +83,7 @@ def build_messages(
     timezone: tzinfo,
     directives: DirectiveSet | None = None,
     command_log: list[LoggedCommand] | None = None,
+    profiles: list[Profile] | None = None,
 ) -> list[dict]:
     """Build the OpenAI-format message list from the system prompt and history.
 
@@ -92,7 +98,7 @@ def build_messages(
     messages: list[dict] = [
         {
             "role": "system",
-            "content": _render_system(system_prompt, directives, command_log, timezone),
+            "content": _render_system(system_prompt, directives, command_log, profiles, timezone),
         }
     ]
     for item in history:
@@ -110,6 +116,7 @@ def _render_system(
     base: str,
     directives: DirectiveSet | None,
     command_log: list[LoggedCommand] | None,
+    profiles: list[Profile] | None,
     timezone: tzinfo,
 ) -> str:
     parts = [base, _OUTPUT_FORMAT, _TIME_CONTEXT]
@@ -124,6 +131,9 @@ def _render_system(
             for c in command_log
         )
         parts.append(_ACTIVITY_HEADER + "\n" + events)
+    if profiles:
+        blocks = "\n".join(f"{p.subject}:\n{_bullets(p.notes)}" for p in profiles)
+        parts.append(_PROFILES_HEADER + "\n" + blocks)
     return "\n\n".join(parts)
 
 

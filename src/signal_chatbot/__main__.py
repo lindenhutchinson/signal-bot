@@ -88,6 +88,7 @@ async def _run() -> None:
             default_tools(
                 bot_name,
                 db.directives,
+                db.profiles,
                 wikipedia,
                 wikipedia_max_section_chars=settings.wikipedia_max_section_chars,
                 web_search=web_search,
@@ -124,6 +125,7 @@ async def _run() -> None:
         command_log=db.commands,
         arming=db.arming,
         disclaimers=db.disclaimers,
+        profiles=db.profiles,
         lobotomiser=lobotomiser,
         name=bot_name,
         system_prompt=settings.load_system_prompt(),

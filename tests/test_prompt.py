@@ -2,7 +2,7 @@ from zoneinfo import ZoneInfo
 
 from signal_chatbot.history import StoredMessage
 from signal_chatbot.llm.prompt import BOT_SENDER, build_messages
-from signal_chatbot.state import Directive, DirectiveSet, LoggedCommand
+from signal_chatbot.state import Directive, DirectiveSet, LoggedCommand, Profile
 
 SYDNEY = ZoneInfo("Australia/Sydney")
 
@@ -48,6 +48,28 @@ def test_command_activity_renders_without_arguments() -> None:
 
     assert "## Recent command activity" in system
     assert "Bob · @reset · 2026-06-13 00:32 AEST" in system
+
+
+def test_profiles_section_renders_subjects_and_notes() -> None:
+    profiles = [
+        Profile(subject="Dave", notes=["fears geese", "owns a boat"]),
+        Profile(subject="Alice", notes=["loves cats"]),
+    ]
+
+    system = build_messages("BASE", [], timezone=SYDNEY, profiles=profiles)[0]["content"]
+
+    assert "## What you know about people" in system
+    assert "Dave:" in system
+    assert "- fears geese" in system and "- owns a boat" in system
+    assert "Alice:" in system and "- loves cats" in system
+
+
+def test_profiles_section_is_absent_when_empty_or_none() -> None:
+    none_system = build_messages("BASE", [], timezone=SYDNEY, profiles=None)[0]["content"]
+    empty_system = build_messages("BASE", [], timezone=SYDNEY, profiles=[])[0]["content"]
+
+    assert "## What you know about people" not in none_system
+    assert "## What you know about people" not in empty_system
 
 
 def test_base_prompt_is_followed_by_the_output_format_contract() -> None:

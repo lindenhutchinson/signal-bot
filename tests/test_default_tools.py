@@ -27,15 +27,22 @@ def _names(tools) -> set[str]:
 
 async def test_default_tools_registers_authoring_tools(directives) -> None:
     name = BotName(FakeNameSetter(), initial="Bot")
-    tools = default_tools(name, directives, None, wikipedia_max_section_chars=100)  # type: ignore[arg-type]
+    tools = default_tools(name, directives, None, None, wikipedia_max_section_chars=100)  # type: ignore[arg-type]
 
     assert {"add_rule", "add_lore", "set_name"} <= _names(tools)
+
+
+async def test_default_tools_registers_remember_about_user(directives) -> None:
+    name = BotName(FakeNameSetter(), initial="Bot")
+    tools = default_tools(name, directives, None, None, wikipedia_max_section_chars=100)  # type: ignore[arg-type]
+
+    assert "remember_about_user" in _names(tools)
 
 
 async def test_web_search_included_only_when_provided(directives) -> None:
     name = BotName(FakeNameSetter(), initial="Bot")
 
-    without = default_tools(name, directives, None, wikipedia_max_section_chars=100)  # type: ignore[arg-type]
+    without = default_tools(name, directives, None, None, wikipedia_max_section_chars=100)  # type: ignore[arg-type]
     assert "web_search" not in _names(without)
 
     class _StubWebSearch:
@@ -48,6 +55,7 @@ async def test_web_search_included_only_when_provided(directives) -> None:
     with_search = default_tools(
         name,
         directives,
+        None,  # type: ignore[arg-type]
         None,  # type: ignore[arg-type]
         wikipedia_max_section_chars=100,
         web_search=_StubWebSearch(),  # type: ignore[arg-type]

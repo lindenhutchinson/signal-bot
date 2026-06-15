@@ -8,7 +8,7 @@ from signal_chatbot.commands.parser import Command
 from signal_chatbot.history import HistoryStore
 from signal_chatbot.llm.prompt import BOT_SENDER
 from signal_chatbot.llm.reply import BotReply
-from signal_chatbot.state import DirectiveSet
+from signal_chatbot.state import DirectiveSet, Profile
 from signal_chatbot.transport.models import IncomingMessage, OutgoingMessage
 
 GROUP = "group.allowed="
@@ -110,8 +110,10 @@ class FakeCommands:
 
 
 class FakeState:
-    def __init__(self, armed: bool = False) -> None:
+    def __init__(self, armed: bool = False, profiles: list[Profile] | None = None) -> None:
         self.directives_calls: list[str] = []
+        self.profiles_calls: list[str] = []
+        self.profiles = profiles or []
         self.armed: dict[str, int] = {GROUP: 0} if armed else {}
 
     async def directives(self, group_id: str) -> DirectiveSet:
@@ -120,6 +122,10 @@ class FakeState:
 
     async def recent_commands(self, group_id: str):
         return []
+
+    async def all(self, group_id: str) -> list[Profile]:
+        self.profiles_calls.append(group_id)
+        return self.profiles
 
     async def is_suicide_armed(self, group_id: str) -> bool:
         return group_id in self.armed
@@ -137,8 +143,8 @@ async def history(tmp_path: Path) -> HistoryStore:
 
 
 def make_bot(history, signal, conversation, **overrides) -> Bot:
-    # One FakeState satisfies all three split state Protocols (directives, command log,
-    # arming); tests pass it via ``state=`` and it's fanned out to each dependency.
+    # One FakeState satisfies all four split state Protocols (directives, command log,
+    # arming, profiles); tests pass it via ``state=`` and it's fanned out to each dependency.
     state = overrides.pop("state", None) or FakeState()
     kwargs = dict(
         signal=signal,
@@ -149,6 +155,7 @@ def make_bot(history, signal, conversation, **overrides) -> Bot:
         command_log=state,
         arming=state,
         disclaimers=FakeDisclaimers(),
+        profiles=state,
         lobotomiser=FakeLobotomiser(),
         name=FakeName(),
         system_prompt="You are Bot.",
@@ -330,6 +337,19 @@ async def test_reply_threads_directives_and_command_log(history) -> None:
 
     assert state.directives_calls == [GROUP]  # state read on the reply path
     assert signal.sent[0].text == "hi"
+
+
+async def test_reply_fetches_profiles_and_passes_them_into_the_prompt(history) -> None:
+    signal, convo = FakeSignal(), FakeConversation(reply="hi")
+    state = FakeState(profiles=[Profile(subject="Dave", notes=["fears geese"])])
+    bot = make_bot(history, signal, convo, state=state)
+
+    await bot.handle(message("@bot hello"))
+
+    assert state.profiles_calls == [GROUP]  # profiles read on the reply path
+    system = convo.seen[0][0]["content"]
+    assert "## What you know about people" in system
+    assert "Dave:" in system and "- fears geese" in system
 
 
 async def test_armed_state_is_passed_to_the_conversation(history) -> None:

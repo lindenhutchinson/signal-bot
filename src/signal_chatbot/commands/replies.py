@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import tzinfo
 
-from signal_chatbot.state import Directive, Disclaimer
+from signal_chatbot.state import Directive, Disclaimer, Profile
 from signal_chatbot.timefmt import format_timestamp
 
 _EXCERPT_LEN = 40
@@ -14,6 +14,7 @@ RULE_LOGGED = "Rule logged. ⚖️"
 LORE_ADDED = "Lore added. 📜"
 RESET_CLEAN = "Reset — everything's gone. Starting over."
 LOBOTOMISED = "Lobotomised. Rules, lore, history, name — all gone. Blank slate."
+FORGOT_ALL = "Forgotten everyone — all profiles cleared. 🧽"
 
 USAGE_RULE = "Usage: @rule <text> — adds a hard rule the bot must follow."
 USAGE_LORE = "Usage: @lore <text> — adds a fact the bot treats as true."
@@ -31,8 +32,10 @@ HELP_TEXT = (
     "  @rulelist       List active rules.\n"
     "  @lorelist       List active lore.\n"
     "  @disclaimers    Show the asides the bot attached to its messages.\n"
+    "  @profiles       Show what the bot remembers about people.\n"
     "\n"
     "Wipe\n"
+    "  @forget [name]  Make the bot forget everyone, or just one person.\n"
     "  @reset          Wipe rules, lore & chat history. The bot leaves a\n"
     "                  parting note and is reborn under a fresh name.\n"
     "  @lobotomy       Nuke EVERYTHING — rules, lore, history & name. No goodbye.\n"
@@ -70,6 +73,27 @@ def format_disclaimers(disclaimers: Sequence[Disclaimer], *, tz: tzinfo) -> str:
         when = format_timestamp(d.created_at, tz)
         lines.append(f'{i}. [{when}] "{d.disclaimer}" — re: "{_excerpt(d.message)}"')
     return "\n".join(lines)
+
+
+def format_profiles(profiles: Sequence[Profile]) -> str:
+    """Render the bot's per-subject notes, each subject followed by its bulleted notes."""
+    if not profiles:
+        return "No profiles yet."
+    lines = ["Profiles:"]
+    for p in profiles:
+        lines.append(f"{p.subject}:")
+        lines.extend(f"  - {note}" for note in p.notes)
+    return "\n".join(lines)
+
+
+def forgot_one(name: str) -> str:
+    """Confirmation that one subject's profile was dropped."""
+    return f"Forgotten everything about {name}. 🧽"
+
+
+def no_such_profile(name: str) -> str:
+    """Reply when ``@forget <name>`` matched no subject."""
+    return f"I don't have anything on {name}."
 
 
 def _excerpt(text: str) -> str:

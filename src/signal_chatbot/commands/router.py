@@ -79,6 +79,10 @@ class CommandRouter:
                     await self._disclaimers.recent_disclaimers(message.group_id),
                     tz=self._timezone,
                 )
+            case CommandName.PROFILES:
+                return replies.format_profiles(await self._profiles.all(message.group_id))
+            case CommandName.FORGET:
+                return await self._forget(message, command.arg.strip())
             case CommandName.NAME:
                 return await self._name(message, command.arg.strip())
             case CommandName.RESET:
@@ -111,6 +115,17 @@ class CommandRouter:
         await self._name_setter.set_profile_name(new_name)
         await self._log(message, CommandName.NAME)
         return replies.format_name_set(new_name)
+
+    async def _forget(self, message: IncomingMessage, subject: str) -> str:
+        """Drop one subject's profile (``@forget <name>``) or all of them (``@forget``)."""
+        if subject:
+            found = await self._profiles.forget(message.group_id, subject)
+            reply = replies.forgot_one(subject) if found else replies.no_such_profile(subject)
+        else:
+            await self._profiles.clear(message.group_id)
+            reply = replies.FORGOT_ALL
+        await self._log(message, CommandName.FORGET)
+        return reply
 
     async def _reset(self, message: IncomingMessage) -> str:
         """Soft wipe: farewell, then clear directives, history, disclaimers, profiles and

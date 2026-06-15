@@ -22,6 +22,15 @@ def test_rulelist_is_not_confused_with_rule() -> None:
     assert parse("@rule list") == Command(CommandName.RULE, "list")
 
 
+def test_profiles_parses_with_no_argument() -> None:
+    assert parse("@profiles") == Command(CommandName.PROFILES, "")
+
+
+def test_forget_parses_with_and_without_a_name() -> None:
+    assert parse("@forget") == Command(CommandName.FORGET, "")
+    assert parse("@forget Dave") == Command(CommandName.FORGET, "Dave")
+
+
 def test_non_command_text_returns_none() -> None:
     assert parse("just chatting") is None
     assert parse("@bot what's up") is None
