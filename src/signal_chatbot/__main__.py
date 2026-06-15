@@ -72,6 +72,7 @@ async def _run() -> None:
         ToolRegistry(
             default_tools(
                 bot_name,
+                db.directives,
                 wikipedia,
                 wikipedia_max_section_chars=settings.wikipedia_max_section_chars,
             )
