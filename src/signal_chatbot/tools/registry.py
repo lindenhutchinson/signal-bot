@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from pydantic import ValidationError
 
 from signal_chatbot.logging import get_logger
-from signal_chatbot.tools.base import Tool
+from signal_chatbot.tools.base import Tool, ToolContext, ToolOutcome
 
 log = get_logger(__name__)
 
@@ -15,9 +15,10 @@ log = get_logger(__name__)
 class ToolRegistry:
     """A name -> tool lookup that validates args and never raises on dispatch.
 
-    ``dispatch`` returns a string in all cases (success, unknown tool, bad
-    args, or a tool that raised) because that string is fed straight back to the
-    model as the tool result — a raised exception would abort the reply instead.
+    ``dispatch`` returns a :class:`ToolOutcome` in all cases (success, unknown
+    tool, bad args, or a tool that raised) because its ``result`` is fed straight
+    back to the model — a raised exception would abort the reply instead. A tool
+    returning a bare ``str`` is normalised to ``ToolOutcome(result=str)``.
     """
 
     def __init__(self, tools: Iterable[Tool] = ()):
@@ -35,19 +36,20 @@ class ToolRegistry:
     def is_empty(self) -> bool:
         return not self._tools
 
-    async def dispatch(self, name: str, arguments: dict) -> str:
-        """Validate ``arguments`` and run the named tool, returning its result."""
+    async def dispatch(self, name: str, arguments: dict, ctx: ToolContext) -> ToolOutcome:
+        """Validate ``arguments`` and run the named tool, returning its outcome."""
         tool = self._tools.get(name)
         if tool is None:
             log.warning("tool.unknown", name=name)
-            return f"Error: unknown tool {name!r}."
+            return ToolOutcome(result=f"Error: unknown tool {name!r}.")
         try:
             args = tool.Args.model_validate(arguments)
         except ValidationError as exc:
             log.warning("tool.bad_args", name=name, error=str(exc))
-            return f"Error: invalid arguments for {name!r}: {exc}"
+            return ToolOutcome(result=f"Error: invalid arguments for {name!r}: {exc}")
         try:
-            return await tool.run(args)
+            outcome = await tool.run(args, ctx)
         except Exception as exc:  # noqa: BLE001 - surface failure to the model, don't crash
             log.warning("tool.failed", name=name, error=str(exc))
-            return f"Error running {name!r}: {exc}"
+            return ToolOutcome(result=f"Error running {name!r}: {exc}")
+        return outcome if isinstance(outcome, ToolOutcome) else ToolOutcome(result=outcome)

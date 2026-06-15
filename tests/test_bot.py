@@ -6,8 +6,8 @@ import pytest
 from signal_chatbot.bot import _UNPROMPTED_NUDGE, Bot
 from signal_chatbot.commands.parser import Command
 from signal_chatbot.history import HistoryStore
-from signal_chatbot.llm.conversation import BotReply
 from signal_chatbot.llm.prompt import BOT_SENDER
+from signal_chatbot.llm.reply import BotReply
 from signal_chatbot.state import DirectiveSet
 from signal_chatbot.transport.models import IncomingMessage, OutgoingMessage
 
@@ -44,6 +44,7 @@ class FakeConversation:
         footer: str = "",
         attempted_self_destruct: bool = False,
         self_lobotomy: bool = False,
+        announcements: list[str] | None = None,
     ) -> None:
         self.reply = reply
         self.disclaimer = disclaimer
@@ -51,18 +52,22 @@ class FakeConversation:
         self.footer = footer
         self.attempted = attempted_self_destruct
         self.self_lobotomy = self_lobotomy
+        self.announcements = announcements or []
         self.seen: list[list[dict]] = []
         self.seen_armed: list[bool] = []
+        self.seen_ctx: list = []
 
-    async def respond(self, messages: list[dict], *, armed: bool = False) -> BotReply:
+    async def respond(self, messages, ctx, *, armed: bool = False) -> BotReply:
         self.seen.append(messages)
         self.seen_armed.append(armed)
+        self.seen_ctx.append(ctx)
         if self.error is not None:
             raise self.error
         return BotReply(
             message=self.reply,
             ethical_disclaimer=self.disclaimer,
             tool_footer=self.footer,
+            announcements=list(self.announcements),
             attempted_self_destruct=self.attempted,
             self_lobotomy=self.self_lobotomy,
         )
@@ -111,7 +116,7 @@ class FakeState:
 
     async def directives(self, group_id: str) -> DirectiveSet:
         self.directives_calls.append(group_id)
-        return DirectiveSet(patches=[], rules=[], lore=[])
+        return DirectiveSet(rules=[], lore=[])
 
     async def recent_commands(self, group_id: str):
         return []
@@ -132,12 +137,17 @@ async def history(tmp_path: Path) -> HistoryStore:
 
 
 def make_bot(history, signal, conversation, **overrides) -> Bot:
+    # One FakeState satisfies all three split state Protocols (directives, command log,
+    # arming); tests pass it via ``state=`` and it's fanned out to each dependency.
+    state = overrides.pop("state", None) or FakeState()
     kwargs = dict(
         signal=signal,
         history=history,
         conversation=conversation,
         commands=FakeCommands(),
-        state=FakeState(),
+        directives=state,
+        command_log=state,
+        arming=state,
         disclaimers=FakeDisclaimers(),
         lobotomiser=FakeLobotomiser(),
         name=FakeName(),
@@ -218,13 +228,13 @@ async def test_error_during_completion_sends_fallback_reply(history) -> None:
 
 async def test_command_is_intercepted_replied_and_kept_out_of_history(history) -> None:
     signal, convo = FakeSignal(), FakeConversation()
-    commands = FakeCommands(reply="Patched. 🩹")
+    commands = FakeCommands(reply="Rule logged. ⚖️")
     bot = make_bot(history, signal, convo, commands=commands)
 
-    await bot.handle(message("@patch no puns"))
+    await bot.handle(message("@rule no puns"))
 
-    assert [c.name.value for c in commands.handled] == ["patch"]
-    assert signal.sent[0].text == "Patched. 🩹"
+    assert [c.name.value for c in commands.handled] == ["rule"]
+    assert signal.sent[0].text == "Rule logged. ⚖️"
     assert convo.seen == []  # LLM never called
     assert await history.recent(GROUP) == []  # command not stored as conversation
 
@@ -234,7 +244,7 @@ async def test_failing_command_sends_fallback_and_does_not_raise(history) -> Non
     commands = FakeCommands(error=RuntimeError("boom"))
     bot = make_bot(history, signal, convo, commands=commands)
 
-    await bot.handle(message("@patch x"))
+    await bot.handle(message("@rule x"))
 
     assert signal.sent[0].text == "oops"
 
@@ -244,7 +254,7 @@ async def test_command_from_disallowed_group_is_ignored(history) -> None:
     commands = FakeCommands()
     bot = make_bot(history, signal, convo, commands=commands)
 
-    await bot.handle(message("@patch x", group=OTHER_GROUP))
+    await bot.handle(message("@rule x", group=OTHER_GROUP))
 
     assert commands.handled == []
     assert signal.sent == []
@@ -275,6 +285,19 @@ async def test_tool_footer_is_sent_but_kept_out_of_history(history) -> None:
     # ...but history stores only the core message, so the model never sees the footer
     stored = await history.recent(GROUP)
     assert stored[-1].text == "here's the scoop"
+
+
+async def test_announcements_are_sent_as_their_own_messages_after_the_reply(history) -> None:
+    signal = FakeSignal()
+    convo = FakeConversation(reply="here you go", announcements=["📢 a rule", "📜 some lore"])
+    bot = make_bot(history, signal, convo)
+
+    await bot.handle(message("@bot do it"))
+
+    # main reply first, then each announcement as its own message
+    assert [m.text for m in signal.sent] == ["here you go", "📢 a rule", "📜 some lore"]
+    # ...but announcements are kept OUT of history (only the core reply is stored)
+    assert [m.text for m in await history.recent(GROUP)] == ["@bot do it", "here you go"]
 
 
 async def test_tool_footer_suppressed_on_error_fallback(history) -> None:

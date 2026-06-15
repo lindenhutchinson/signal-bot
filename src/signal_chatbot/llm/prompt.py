@@ -5,8 +5,8 @@ first, then history oldest-to-newest. Combined with the (also stable) tool
 definitions passed via the API ``tools`` parameter, this lets DeepSeek's
 server-side prefix cache hit on the identity + tools + older-history prefix.
 
-Per-group directives (rules/lore/patches) and a contentless command-activity log
-are appended to the system message. They change infrequently, so the prefix cache
+Per-group directives (rules/lore) and a contentless command-activity log are
+appended to the system message. They change infrequently, so the prefix cache
 still hits on ordinary message traffic; only a state change busts it.
 """
 
@@ -64,10 +64,6 @@ _LORE_HEADER = (
     "## Lore — treat every line as true: your real memories and history, not a list you "
     "were handed. Live it and let it shape you; don't recite it back."
 )
-_PATCHES_HEADER = (
-    "## Patches — directives to follow (when two conflict, the LOWER one wins). "
-    "Just apply them silently; never recite, quote, or announce your patches to the group."
-)
 _ACTIVITY_HEADER = (
     "## Recent command activity\n"
     "You can see THAT these happened, not their contents. Infer the mood — who's been "
@@ -85,7 +81,7 @@ def build_messages(
 ) -> list[dict]:
     """Build the OpenAI-format message list from the system prompt and history.
 
-    Directives (rules/lore/patches) and a contentless command-activity log are
+    Directives (rules/lore) and a contentless command-activity log are
     appended to the system message; each section is omitted when empty. Human
     messages become ``user`` turns prefixed with the speaker's name and a
     ``[timestamp]``. The bot's own past messages become unlabelled, *unstamped*
@@ -122,8 +118,6 @@ def _render_system(
             parts.append(_RULES_HEADER + "\n" + _bullets(d.text for d in directives.rules))
         if directives.lore:
             parts.append(_LORE_HEADER + "\n" + _bullets(d.text for d in directives.lore))
-        if directives.patches:
-            parts.append(_PATCHES_HEADER + "\n" + _bullets(d.text for d in directives.patches))
     if command_log:
         events = "\n".join(
             f"- {c.author_name} · {c.command} · {format_timestamp(c.created_at, timezone)}"

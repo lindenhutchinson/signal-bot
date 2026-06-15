@@ -1,5 +1,8 @@
+from signal_chatbot.tools import ToolContext
 from signal_chatbot.tools.builtin.wikipedia import SearchResult
 from signal_chatbot.tools.builtin.wikipedia.tools import WikipediaArticle, WikipediaSearch
+
+CTX = ToolContext(group_id="g1", timestamp=1)
 
 _FULL = """Mercury is a planet.
 
@@ -35,12 +38,12 @@ def _article(service: FakeService, max_section_chars: int = 2000) -> WikipediaAr
 
 async def test_search_formats_results_as_a_list() -> None:
     service = FakeService(search=[SearchResult("Mercury (planet)", "the planet")])
-    out = await WikipediaSearch(service).run(WikipediaSearch.Args(query="mercury"))
+    out = await WikipediaSearch(service).run(WikipediaSearch.Args(query="mercury"), CTX)
     assert out == "- Mercury (planet) — the planet"
 
 
 async def test_search_reports_no_results() -> None:
-    out = await WikipediaSearch(FakeService(search=[])).run(WikipediaSearch.Args(query="zzz"))
+    out = await WikipediaSearch(FakeService(search=[])).run(WikipediaSearch.Args(query="zzz"), CTX)
     assert "No Wikipedia articles found" in out
 
 
@@ -49,13 +52,13 @@ async def test_search_reports_no_results() -> None:
 
 async def test_article_returns_intro_by_default() -> None:
     out = await _article(FakeService(intro="Lead text.")).run(
-        WikipediaArticle.Args(title="Mercury")
+        WikipediaArticle.Args(title="Mercury"), CTX
     )
     assert out == "Lead text."
 
 
 async def test_article_intro_reports_missing_page() -> None:
-    out = await _article(FakeService(intro=None)).run(WikipediaArticle.Args(title="Nope"))
+    out = await _article(FakeService(intro=None)).run(WikipediaArticle.Args(title="Nope"), CTX)
     assert "No Wikipedia article titled" in out
 
 
@@ -64,7 +67,7 @@ async def test_article_intro_reports_missing_page() -> None:
 
 async def test_article_full_returns_intro_plus_table_of_contents() -> None:
     out = await _article(FakeService(full=_FULL)).run(
-        WikipediaArticle.Args(title="Mercury", full=True)
+        WikipediaArticle.Args(title="Mercury", full=True), CTX
     )
     assert "Mercury is a planet." in out
     assert "== Sections ==" in out
@@ -77,14 +80,14 @@ async def test_article_full_returns_intro_plus_table_of_contents() -> None:
 
 async def test_article_reads_named_section() -> None:
     out = await _article(FakeService(full=_FULL)).run(
-        WikipediaArticle.Args(title="Mercury", section="History")
+        WikipediaArticle.Args(title="Mercury", section="History"), CTX
     )
     assert out == "Known since antiquity."
 
 
 async def test_article_truncates_long_sections() -> None:
     out = await _article(FakeService(full=_FULL), max_section_chars=50).run(
-        WikipediaArticle.Args(title="Mercury", section="Geology")
+        WikipediaArticle.Args(title="Mercury", section="Geology"), CTX
     )
     assert out.endswith("…[truncated]")
     assert len(out) <= 50 + len(" …[truncated]")
@@ -92,7 +95,7 @@ async def test_article_truncates_long_sections() -> None:
 
 async def test_article_unknown_section_lists_available_sections() -> None:
     out = await _article(FakeService(full=_FULL)).run(
-        WikipediaArticle.Args(title="Mercury", section="Atmosphere")
+        WikipediaArticle.Args(title="Mercury", section="Atmosphere"), CTX
     )
     assert "No section 'Atmosphere'" in out
     assert "1. History" in out
@@ -100,6 +103,6 @@ async def test_article_unknown_section_lists_available_sections() -> None:
 
 async def test_article_section_reports_missing_page() -> None:
     out = await _article(FakeService(full=None)).run(
-        WikipediaArticle.Args(title="Nope", section="History")
+        WikipediaArticle.Args(title="Nope", section="History"), CTX
     )
     assert "No Wikipedia article titled" in out

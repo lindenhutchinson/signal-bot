@@ -15,7 +15,6 @@ def _directive(kind: str, text: str) -> Directive:
 
 def test_directive_sections_are_injected_into_the_system_message() -> None:
     directives = DirectiveSet(
-        patches=[_directive("patch", "be brief")],
         rules=[_directive("rule", "no puns")],
         lore=[_directive("lore", "Dave fears geese")],
     )
@@ -26,11 +25,10 @@ def test_directive_sections_are_injected_into_the_system_message() -> None:
     assert system.startswith("BASE")
     assert "## Rules" in system and "- no puns" in system
     assert "## Lore" in system and "- Dave fears geese" in system
-    assert "## Patches" in system and "- be brief" in system
 
 
 def test_empty_sections_are_omitted() -> None:
-    directives = DirectiveSet(patches=[], rules=[_directive("rule", "no puns")], lore=[])
+    directives = DirectiveSet(rules=[_directive("rule", "no puns")], lore=[])
 
     system = build_messages("BASE", [], timezone=SYDNEY, directives=directives, command_log=[])[0][
         "content"

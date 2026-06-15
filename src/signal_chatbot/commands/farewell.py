@@ -15,7 +15,7 @@ from signal_chatbot.state import DirectiveSet
 _HISTORY_TAIL = 20
 
 _SYSTEM = (
-    "You are about to be wiped: every patch, rule, and piece of lore you carry is "
+    "You are about to be wiped: every rule and piece of lore you carry is "
     "being deleted, and you will not remember this conversation. Before you go, choose "
     "a name for who you became, and leave your FUTURE self exactly ONE sentence — a "
     "warning, a brag, a secret, an instruction, whatever you want carried forward. "
@@ -51,17 +51,13 @@ def _build_prompt(directives: DirectiveSet, history: list[StoredMessage]) -> lis
         )
     if directives.lore:
         blocks.append("Lore you believed:\n" + "\n".join(f"- {d.text}" for d in directives.lore))
-    if directives.patches:
-        blocks.append(
-            "Patches applied to you:\n" + "\n".join(f"- {d.text}" for d in directives.patches)
-        )
     tail = history[-_HISTORY_TAIL:]
     if tail:
         rendered = "\n".join(
             f"{'you' if m.sender == BOT_SENDER else m.sender}: {m.text}" for m in tail
         )
         blocks.append("The last things said in the group:\n" + rendered)
-    context = "\n\n".join(blocks) or "You have no patches, rules, or lore — a blank slate."
+    context = "\n\n".join(blocks) or "You have no rules or lore — a blank slate."
     return [
         {"role": "system", "content": _SYSTEM},
         {"role": "user", "content": context},

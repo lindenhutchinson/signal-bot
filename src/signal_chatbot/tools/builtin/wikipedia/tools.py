@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from signal_chatbot.tools.base import Tool
+from signal_chatbot.tools.base import Tool, ToolContext
 from signal_chatbot.tools.builtin.wikipedia import article as article_parser
 from signal_chatbot.tools.builtin.wikipedia.service import WikipediaService
 
@@ -28,7 +28,7 @@ class WikipediaSearch(Tool):
     def __init__(self, service: WikipediaService):
         self._service = service
 
-    async def run(self, args: WikipediaSearch.Args) -> str:
+    async def run(self, args: WikipediaSearch.Args, ctx: ToolContext) -> str:
         results = await self._service.search(args.query)
         if not results:
             return f"No Wikipedia articles found for {args.query!r}."
@@ -58,7 +58,7 @@ class WikipediaArticle(Tool):
         self._service = service
         self._max_section_chars = max_section_chars
 
-    async def run(self, args: WikipediaArticle.Args) -> str:
+    async def run(self, args: WikipediaArticle.Args, ctx: ToolContext) -> str:
         title = args.title.strip()
         if args.section is not None:
             return await self._read_section(title, args.section)

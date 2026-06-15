@@ -30,30 +30,28 @@ fast path handled **without** calling the LLM (the one exception is `@reset`).
 Commands must be the **start** of the message; the `@bot` trigger is unaffected.
 
 ```
-@patch <text>   Add a general directive the bot follows.
 @rule <text>    Add a hard rule the bot must obey.
 @lore <text>    Add a fact/story the bot treats as true.
 @name <text>    Rename the bot (its Signal display name, account-global).
-@patchlist      List active patches (who added them, when).
 @rulelist       List active rules.
 @lorelist       List active lore.
 @disclaimers    Show the asides the bot attached to its messages.
-@reset          Wipe patches, rules, lore & history. The bot leaves a parting note.
-@lobotomy       Nuke EVERYTHING: patches, rules, lore, history & name. No goodbye.
+@reset          Wipe rules, lore & history. The bot leaves a parting note.
+@lobotomy       Nuke EVERYTHING: rules, lore, history & name. No goodbye.
 @help           Show this message.
 ```
 
-- **Patches, rules, and lore** are per-group and injected into the system prompt
-  as labelled sections. They are gospel: on a contradiction, the **most recent**
-  (lower) entry wins.
+- **Rules and lore** are per-group and injected into the system prompt as labelled
+  sections. They are gospel: on a contradiction, the **most recent** (lower) entry
+  wins.
 - **`@reset`** is the soft wipe: it asks the model for a one-sentence farewell to its
-  future self (`Final message from <name>: …`), clears patches, rules, lore **and chat
-  history**, renames the bot to the new generation's chosen name, then seeds that
-  sentence back as the sole surviving piece of lore — so identity passes down a
-  generation.
-- **`@lobotomy`** is the nuclear option: it wipes directives *and* history *and*
-  resets the display name (`DEFAULT_DISPLAY_NAME`), with no farewell and no
-  surviving lore — a true blank slate. (Disclaimers and the command log are kept.)
+  future self (`Final message from <name>: …`), clears rules, lore, **chat history,
+  disclaimers and profiles**, renames the bot to the new generation's chosen name, then
+  seeds that sentence back as the sole surviving piece of lore — so identity passes down
+  a generation.
+- **`@lobotomy`** is the nuclear option: it wipes directives, history, disclaimers and
+  profiles, *and* resets the display name (`DEFAULT_DISPLAY_NAME`), with no farewell and
+  no surviving lore — a true blank slate. (The command log is kept.)
 - A contentless **command-activity log** (who ran what command, when — never the
   arguments) is also injected into the prompt, giving the bot a sense of how its
   state has been churning without exposing the contents.

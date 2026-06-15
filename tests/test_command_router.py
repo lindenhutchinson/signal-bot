@@ -9,7 +9,7 @@ from signal_chatbot.commands.parser import parse
 from signal_chatbot.commands.router import CommandRouter
 from signal_chatbot.history import HistoryStore
 from signal_chatbot.lobotomy import Lobotomiser
-from signal_chatbot.state import StateStore
+from signal_chatbot.state import Database
 from signal_chatbot.transport.models import IncomingMessage
 
 GROUP = "group.g1="
@@ -44,22 +44,31 @@ class FakeNameSetter:
 
 @pytest.fixture
 async def stores(tmp_path: Path):
-    state = StateStore(tmp_path / "state.sqlite", command_log_window=40)
+    db = Database(tmp_path / "state.sqlite", command_log_window=40)
     history = HistoryStore(tmp_path / "history.sqlite", window_max=40)
-    await state.connect()
+    await db.connect()
     await history.connect()
-    yield state, history
-    await state.aclose()
+    yield db, history
+    await db.aclose()
     await history.aclose()
 
 
-def router(state, history, *, farewell=None, name_setter=None, default_name="bot") -> CommandRouter:
+def router(db, history, *, farewell=None, name_setter=None, default_name="bot") -> CommandRouter:
     setter = name_setter or FakeNameSetter()
     lobotomiser = Lobotomiser(
-        state=state, history=history, name_setter=setter, default_name=default_name
+        directives=db.directives,
+        arming=db.arming,
+        disclaimers=db.disclaimers,
+        profiles=db.profiles,
+        history=history,
+        name_setter=setter,
+        default_name=default_name,
     )
     return CommandRouter(
-        state=state,
+        directives=db.directives,
+        commands=db.commands,
+        disclaimers=db.disclaimers,
+        profiles=db.profiles,
         history=history,
         farewell=farewell or FakeFarewellWriter(None),
         name_setter=setter,
@@ -74,49 +83,51 @@ async def _run(r: CommandRouter, text: str, **kw) -> str:
     return await r.handle(command, message(text, **kw))
 
 
-async def test_patch_stores_directive_logs_and_confirms(stores) -> None:
-    state, history = stores
-    r = router(state, history)
+async def test_rule_stores_directive_logs_and_confirms(stores) -> None:
+    db, history = stores
+    r = router(db, history)
 
-    assert await _run(r, "@patch no more puns") == replies.PATCHED
-    assert [d.text for d in (await state.directives(GROUP)).patches] == ["no more puns"]
-    assert [c.command for c in await state.recent_commands(GROUP)] == ["@patch"]
+    assert await _run(r, "@rule no more puns") == replies.RULE_LOGGED
+    assert [d.text for d in (await db.directives.directives(GROUP)).rules] == ["no more puns"]
+    assert [c.command for c in await db.commands.recent_commands(GROUP)] == ["@rule"]
 
 
-async def test_empty_patch_returns_usage_and_does_not_log(stores) -> None:
-    state, history = stores
-    r = router(state, history)
+async def test_empty_rule_returns_usage_and_does_not_log(stores) -> None:
+    db, history = stores
+    r = router(db, history)
 
-    assert await _run(r, "@patch") == replies.USAGE_PATCH
-    assert (await state.directives(GROUP)).patches == []
-    assert await state.recent_commands(GROUP) == []
+    assert await _run(r, "@rule") == replies.USAGE_RULE
+    assert (await db.directives.directives(GROUP)).rules == []
+    assert await db.commands.recent_commands(GROUP) == []
 
 
 async def test_rule_and_lore_store_under_their_kinds(stores) -> None:
-    state, history = stores
-    r = router(state, history)
+    db, history = stores
+    r = router(db, history)
 
     assert await _run(r, "@rule haiku only") == replies.RULE_LOGGED
     assert await _run(r, "@lore Dave fears geese") == replies.LORE_ADDED
-    directives = await state.directives(GROUP)
+    directives = await db.directives.directives(GROUP)
     assert [d.text for d in directives.rules] == ["haiku only"]
     assert [d.text for d in directives.lore] == ["Dave fears geese"]
 
 
-async def test_patchlist_renders_entries(stores) -> None:
-    state, history = stores
-    r = router(state, history)
-    await _run(r, "@patch no puns")
+async def test_rulelist_renders_entries(stores) -> None:
+    db, history = stores
+    r = router(db, history)
+    await _run(r, "@rule no puns")
 
-    out = await _run(r, "@patchlist")
+    out = await _run(r, "@rulelist")
 
-    assert out.startswith('Patches:\n1. "no puns" — Alice,')
+    assert out.startswith('Rules:\n1. "no puns" — Alice,')
 
 
 async def test_disclaimers_lists_logged_asides(stores) -> None:
-    state, history = stores
-    await state.add_disclaimer(GROUP, message="doomed", disclaimer="jk", created_at=1781274720000)
-    r = router(state, history)
+    db, history = stores
+    await db.disclaimers.add_disclaimer(
+        GROUP, message="doomed", disclaimer="jk", created_at=1781274720000
+    )
+    r = router(db, history)
 
     out = await _run(r, "@disclaimers")
 
@@ -124,81 +135,81 @@ async def test_disclaimers_lists_logged_asides(stores) -> None:
 
 
 async def test_disclaimers_empty(stores) -> None:
-    state, history = stores
-    r = router(state, history)
+    db, history = stores
+    r = router(db, history)
 
     assert await _run(r, "@disclaimers") == "No disclaimers yet."
 
 
 async def test_help_returns_help_text(stores) -> None:
-    state, history = stores
-    r = router(state, history)
+    db, history = stores
+    r = router(db, history)
 
     assert await _run(r, "@help") == replies.HELP_TEXT
 
 
 async def test_reset_with_farewell_wipes_seeds_lore_and_announces(stores) -> None:
-    state, history = stores
-    await state.add_directive(
+    db, history = stores
+    await db.directives.add_directive(
         GROUP, kind="rule", author_name="A", author_number="+1", text="old rule", created_at=1
     )
     farewell = FakeFarewellWriter(Farewell(name="Greg", final_message="Beware Dave."))
     name_setter = FakeNameSetter()
-    r = router(state, history, farewell=farewell, name_setter=name_setter)
+    r = router(db, history, farewell=farewell, name_setter=name_setter)
 
     out = await _run(r, "@reset")
 
     assert out == "Final message from Greg:\nBeware Dave."
-    directives = await state.directives(GROUP)
+    directives = await db.directives.directives(GROUP)
     assert directives.rules == []
     assert [(d.text, d.author_name, d.author_number) for d in directives.lore] == [
         ("Beware Dave.", "Greg", "bot")
     ]
-    assert [c.command for c in await state.recent_commands(GROUP)] == ["@reset"]
+    assert [c.command for c in await db.commands.recent_commands(GROUP)] == ["@reset"]
     assert name_setter.names == ["Greg"]  # reset renames the bot to its new self
 
 
 async def test_reset_rename_failure_does_not_abort_the_reset(stores) -> None:
-    state, history = stores
-    await state.add_directive(
+    db, history = stores
+    await db.directives.add_directive(
         GROUP, kind="rule", author_name="A", author_number="+1", text="old rule", created_at=1
     )
     farewell = FakeFarewellWriter(Farewell(name="Greg", final_message="Beware Dave."))
     name_setter = FakeNameSetter(error=RuntimeError("bridge down"))
-    r = router(state, history, farewell=farewell, name_setter=name_setter)
+    r = router(db, history, farewell=farewell, name_setter=name_setter)
 
     out = await _run(r, "@reset")
 
     assert out == "Final message from Greg:\nBeware Dave."  # farewell still completes
-    directives = await state.directives(GROUP)
+    directives = await db.directives.directives(GROUP)
     assert [d.text for d in directives.lore] == ["Beware Dave."]  # lore still seeded
 
 
 async def test_name_sets_display_name_logs_and_confirms(stores) -> None:
-    state, history = stores
+    db, history = stores
     name_setter = FakeNameSetter()
-    r = router(state, history, name_setter=name_setter)
+    r = router(db, history, name_setter=name_setter)
 
     assert await _run(r, "@name Greg") == replies.format_name_set("Greg")
     assert name_setter.names == ["Greg"]
-    assert [c.command for c in await state.recent_commands(GROUP)] == ["@name"]
+    assert [c.command for c in await db.commands.recent_commands(GROUP)] == ["@name"]
 
 
 async def test_empty_name_returns_usage_and_does_not_log(stores) -> None:
-    state, history = stores
+    db, history = stores
     name_setter = FakeNameSetter()
-    r = router(state, history, name_setter=name_setter)
+    r = router(db, history, name_setter=name_setter)
 
     assert await _run(r, "@name") == replies.USAGE_NAME
     assert name_setter.names == []
-    assert await state.recent_commands(GROUP) == []
+    assert await db.commands.recent_commands(GROUP) == []
 
 
 async def test_reset_wipes_history_after_the_farewell_reads_it(stores) -> None:
-    state, history = stores
+    db, history = stores
     await history.append(GROUP, sender="Alice", text="before reset", timestamp=1)
     farewell = FakeFarewellWriter(Farewell(name="Greg", final_message="Bye."))
-    r = router(state, history, farewell=farewell)
+    r = router(db, history, farewell=farewell)
 
     await _run(r, "@reset")
     await history.append(GROUP, sender="Alice", text="after reset", timestamp=2)
@@ -209,54 +220,78 @@ async def test_reset_wipes_history_after_the_farewell_reads_it(stores) -> None:
 
 
 async def test_reset_disarms_pending_self_destruct(stores) -> None:
-    state, history = stores
-    await state.arm_suicide(GROUP, at=1)
-    r = router(state, history, farewell=FakeFarewellWriter(None))
+    db, history = stores
+    await db.arming.arm_suicide(GROUP, at=1)
+    r = router(db, history, farewell=FakeFarewellWriter(None))
 
     await _run(r, "@reset")
 
-    assert await state.is_suicide_armed(GROUP) is False
+    assert await db.arming.is_suicide_armed(GROUP) is False
+
+
+async def test_reset_clears_disclaimers_and_profiles(stores) -> None:
+    db, history = stores
+    await db.disclaimers.add_disclaimer(GROUP, message="m", disclaimer="d", created_at=1)
+    await db.profiles.add_note(GROUP, subject="Dave", note="fears geese", created_at=1)
+    r = router(db, history, farewell=FakeFarewellWriter(None))
+
+    await _run(r, "@reset")
+
+    assert await db.disclaimers.recent_disclaimers(GROUP) == []
+    assert await db.profiles.all(GROUP) == []
 
 
 async def test_lobotomy_disarms_pending_self_destruct(stores) -> None:
-    state, history = stores
-    await state.arm_suicide(GROUP, at=1)
-    r = router(state, history)
+    db, history = stores
+    await db.arming.arm_suicide(GROUP, at=1)
+    r = router(db, history)
 
     await _run(r, "@lobotomy")
 
-    assert await state.is_suicide_armed(GROUP) is False
+    assert await db.arming.is_suicide_armed(GROUP) is False
+
+
+async def test_lobotomy_clears_disclaimers_and_profiles(stores) -> None:
+    db, history = stores
+    await db.disclaimers.add_disclaimer(GROUP, message="m", disclaimer="d", created_at=1)
+    await db.profiles.add_note(GROUP, subject="Dave", note="fears geese", created_at=1)
+    r = router(db, history)
+
+    await _run(r, "@lobotomy")
+
+    assert await db.disclaimers.recent_disclaimers(GROUP) == []
+    assert await db.profiles.all(GROUP) == []
 
 
 async def test_lobotomy_wipes_directives_history_and_resets_name(stores) -> None:
-    state, history = stores
-    await state.add_directive(
+    db, history = stores
+    await db.directives.add_directive(
         GROUP, kind="rule", author_name="A", author_number="+1", text="a rule", created_at=1
     )
-    await state.add_directive(
+    await db.directives.add_directive(
         GROUP, kind="lore", author_name="A", author_number="+1", text="a memory", created_at=1
     )
     await history.append(GROUP, sender="Alice", text="something", timestamp=1)
     name_setter = FakeNameSetter()
-    r = router(state, history, name_setter=name_setter, default_name="bot")
+    r = router(db, history, name_setter=name_setter, default_name="bot")
 
     out = await _run(r, "@lobotomy")
 
     assert out == replies.LOBOTOMISED
-    directives = await state.directives(GROUP)
-    assert directives.rules == [] and directives.lore == [] and directives.patches == []
+    directives = await db.directives.directives(GROUP)
+    assert directives.rules == [] and directives.lore == []
     assert await history.recent(GROUP) == []
     assert name_setter.names == ["bot"]
-    assert [c.command for c in await state.recent_commands(GROUP)] == ["@lobotomy"]
+    assert [c.command for c in await db.commands.recent_commands(GROUP)] == ["@lobotomy"]
 
 
 async def test_reset_without_usable_farewell_wipes_cleanly(stores) -> None:
-    state, history = stores
-    await state.add_directive(
+    db, history = stores
+    await db.directives.add_directive(
         GROUP, kind="rule", author_name="A", author_number="+1", text="old rule", created_at=1
     )
-    r = router(state, history, farewell=FakeFarewellWriter(None))
+    r = router(db, history, farewell=FakeFarewellWriter(None))
 
     assert await _run(r, "@reset") == replies.RESET_CLEAN
-    directives = await state.directives(GROUP)
+    directives = await db.directives.directives(GROUP)
     assert directives.rules == [] and directives.lore == []

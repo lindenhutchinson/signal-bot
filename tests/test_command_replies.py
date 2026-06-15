@@ -8,17 +8,15 @@ SYDNEY = ZoneInfo("Australia/Sydney")
 
 def _directive(text: str, *, created_at: int = 1781274720000) -> Directive:
     return Directive(
-        kind="patch", author_name="Alice", author_number="+1", text=text, created_at=created_at
+        kind="rule", author_name="Alice", author_number="+1", text=text, created_at=created_at
     )
 
 
 def test_format_list_numbers_entries_with_author_and_time() -> None:
-    out = replies.format_list(
-        "Patches", [_directive("no puns"), _directive("haiku only")], tz=SYDNEY
-    )
+    out = replies.format_list("Rules", [_directive("no puns"), _directive("haiku only")], tz=SYDNEY)
 
     assert out == (
-        "Patches:\n"
+        "Rules:\n"
         '1. "no puns" — Alice, 2026-06-13 00:32 AEST\n'
         '2. "haiku only" — Alice, 2026-06-13 00:32 AEST'
     )
@@ -54,11 +52,9 @@ def test_format_disclaimers_empty() -> None:
 
 def test_help_text_lists_every_command() -> None:
     for token in (
-        "@patch",
         "@rule",
         "@lore",
         "@name",
-        "@patchlist",
         "@rulelist",
         "@lorelist",
         "@disclaimers",
@@ -69,5 +65,6 @@ def test_help_text_lists_every_command() -> None:
         assert token in replies.HELP_TEXT
 
 
-def test_help_text_no_longer_lists_removed_clear_command() -> None:
+def test_help_text_no_longer_lists_removed_commands() -> None:
     assert "@clear" not in replies.HELP_TEXT
+    assert "@patch" not in replies.HELP_TEXT

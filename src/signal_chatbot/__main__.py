@@ -21,7 +21,7 @@ from signal_chatbot.llm.conversation import Conversation
 from signal_chatbot.llm.deepseek import DeepSeekClient
 from signal_chatbot.lobotomy import Lobotomiser
 from signal_chatbot.logging import configure_logging, get_logger
-from signal_chatbot.state import StateStore
+from signal_chatbot.state import Database
 from signal_chatbot.tools import ToolRegistry
 from signal_chatbot.tools.builtin import default_tools
 from signal_chatbot.tools.builtin.wikipedia import (
@@ -46,8 +46,8 @@ async def _run() -> None:
     bot_name = BotName(signal, initial=settings.default_display_name)
     history = HistoryStore(settings.database_path, window_max=settings.history_window_max)
     await history.connect()
-    state = StateStore(settings.database_path, command_log_window=settings.command_log_window)
-    await state.connect()
+    db = Database(settings.database_path, command_log_window=settings.command_log_window)
+    await db.connect()
     llm = DeepSeekClient(
         api_key=settings.deepseek_api_key,
         model=settings.deepseek_model,
@@ -79,13 +79,19 @@ async def _run() -> None:
         max_iterations=settings.max_tool_iterations,
     )
     lobotomiser = Lobotomiser(
-        state=state,
+        directives=db.directives,
+        arming=db.arming,
+        disclaimers=db.disclaimers,
+        profiles=db.profiles,
         history=history,
         name_setter=bot_name,
         default_name=settings.default_display_name,
     )
     commands = CommandRouter(
-        state=state,
+        directives=db.directives,
+        commands=db.commands,
+        disclaimers=db.disclaimers,
+        profiles=db.profiles,
         history=history,
         farewell=LlmFarewellWriter(llm, max_chars=settings.reset_farewell_max_chars),
         name_setter=bot_name,
@@ -97,8 +103,10 @@ async def _run() -> None:
         history=history,
         conversation=conversation,
         commands=commands,
-        state=state,
-        disclaimers=state,
+        directives=db.directives,
+        command_log=db.commands,
+        arming=db.arming,
+        disclaimers=db.disclaimers,
         lobotomiser=lobotomiser,
         name=bot_name,
         system_prompt=settings.load_system_prompt(),
@@ -122,7 +130,7 @@ async def _run() -> None:
         await signal.aclose()
         await llm.aclose()
         await history.aclose()
-        await state.aclose()
+        await db.aclose()
         await wikipedia_cache.aclose()
         await wikipedia_http.aclose()
 

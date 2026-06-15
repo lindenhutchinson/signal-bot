@@ -1,7 +1,9 @@
 import pytest
 from pydantic import BaseModel
 
-from signal_chatbot.tools import Tool, ToolRegistry
+from signal_chatbot.tools import Tool, ToolContext, ToolOutcome, ToolRegistry
+
+CTX = ToolContext(group_id="g1", timestamp=1)
 
 
 class Echo(Tool):
@@ -11,7 +13,7 @@ class Echo(Tool):
     class Args(BaseModel):
         text: str
 
-    async def run(self, args: "Echo.Args") -> str:
+    async def run(self, args: "Echo.Args", ctx: ToolContext) -> str:
         return args.text.upper()
 
 
@@ -28,25 +30,55 @@ def test_definition_matches_openai_tool_schema() -> None:
 async def test_registry_dispatches_and_validates_args() -> None:
     registry = ToolRegistry([Echo()])
 
-    result = await registry.dispatch("echo", {"text": "hi"})
+    outcome = await registry.dispatch("echo", {"text": "hi"}, CTX)
 
-    assert result == "HI"
+    assert outcome.result == "HI"
+    assert outcome.announcements == []
+
+
+async def test_registry_normalises_a_bare_string_into_a_tool_outcome() -> None:
+    registry = ToolRegistry([Echo()])
+
+    outcome = await registry.dispatch("echo", {"text": "yo"}, CTX)
+
+    assert isinstance(outcome, ToolOutcome)
+    assert outcome.result == "YO"
+    assert outcome.announcements == []
+
+
+async def test_registry_passes_through_a_tool_outcome_with_announcements() -> None:
+    class Announcer(Tool):
+        name = "announce"
+        description = "Make an announcement."
+
+        class Args(BaseModel):
+            pass
+
+        async def run(self, args: "Announcer.Args", ctx: ToolContext) -> ToolOutcome:
+            return ToolOutcome(result="done", announcements=["📢 something happened"])
+
+    registry = ToolRegistry([Announcer()])
+
+    outcome = await registry.dispatch("announce", {}, CTX)
+
+    assert outcome.result == "done"
+    assert outcome.announcements == ["📢 something happened"]
 
 
 async def test_registry_reports_unknown_tool() -> None:
     registry = ToolRegistry([Echo()])
 
-    result = await registry.dispatch("nope", {})
+    outcome = await registry.dispatch("nope", {}, CTX)
 
-    assert "unknown tool" in result.lower()
+    assert "unknown tool" in outcome.result.lower()
 
 
 async def test_registry_reports_invalid_args_without_raising() -> None:
     registry = ToolRegistry([Echo()])
 
-    result = await registry.dispatch("echo", {"wrong": "field"})
+    outcome = await registry.dispatch("echo", {"wrong": "field"}, CTX)
 
-    assert "error" in result.lower()
+    assert "error" in outcome.result.lower()
 
 
 async def test_registry_catches_tool_exceptions() -> None:
@@ -57,14 +89,14 @@ async def test_registry_catches_tool_exceptions() -> None:
         class Args(BaseModel):
             pass
 
-        async def run(self, args: "Boom.Args") -> str:
+        async def run(self, args: "Boom.Args", ctx: ToolContext) -> str:
             raise ValueError("kaboom")
 
     registry = ToolRegistry([Boom()])
 
-    result = await registry.dispatch("boom", {})
+    outcome = await registry.dispatch("boom", {}, CTX)
 
-    assert "error" in result.lower()
+    assert "error" in outcome.result.lower()
 
 
 def test_definitions_returns_all_registered_tools() -> None:

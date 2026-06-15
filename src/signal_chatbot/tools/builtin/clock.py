@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field
 
-from signal_chatbot.tools.base import Tool
+from signal_chatbot.tools.base import Tool, ToolContext
 
 
 class CurrentTime(Tool):
@@ -23,7 +23,7 @@ class CurrentTime(Tool):
             description="IANA timezone name, e.g. 'Australia/Sydney'. Defaults to UTC.",
         )
 
-    async def run(self, args: CurrentTime.Args) -> str:
+    async def run(self, args: CurrentTime.Args, ctx: ToolContext) -> str:
         try:
             tz = ZoneInfo(args.timezone)
         except (ZoneInfoNotFoundError, ValueError):

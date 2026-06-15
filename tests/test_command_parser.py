@@ -2,7 +2,7 @@ from signal_chatbot.commands.parser import Command, CommandName, parse
 
 
 def test_parses_command_with_argument() -> None:
-    assert parse("@patch no more puns") == Command(CommandName.PATCH, "no more puns")
+    assert parse("@rule no more puns") == Command(CommandName.RULE, "no more puns")
 
 
 def test_parses_name_command() -> None:
@@ -17,9 +17,9 @@ def test_leading_and_trailing_whitespace_is_trimmed() -> None:
     assert parse("   @lore   Dave fears geese   ") == Command(CommandName.LORE, "Dave fears geese")
 
 
-def test_patchlist_is_not_confused_with_patch() -> None:
-    assert parse("@patchlist") == Command(CommandName.PATCHLIST, "")
-    assert parse("@patch list") == Command(CommandName.PATCH, "list")
+def test_rulelist_is_not_confused_with_rule() -> None:
+    assert parse("@rulelist") == Command(CommandName.RULELIST, "")
+    assert parse("@rule list") == Command(CommandName.RULE, "list")
 
 
 def test_non_command_text_returns_none() -> None:

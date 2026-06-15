@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from signal_chatbot.tools.base import Tool
+from signal_chatbot.tools.base import Tool, ToolContext
 from signal_chatbot.transport import ProfileNameSetter
 
 _MAX_NAME_LEN = 50
@@ -24,7 +24,7 @@ class SetName(Tool):
     def __init__(self, setter: ProfileNameSetter):
         self._setter = setter
 
-    async def run(self, args: SetName.Args) -> str:
+    async def run(self, args: SetName.Args, ctx: ToolContext) -> str:
         name = args.name.strip()
         if not name:
             return "Error: name cannot be empty."

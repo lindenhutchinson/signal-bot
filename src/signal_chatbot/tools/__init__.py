@@ -5,7 +5,7 @@ nested ``Args`` pydantic model, implement ``run``, and list it in
 ``builtin.default_tools()`` (or pass it to the registry yourself).
 """
 
-from signal_chatbot.tools.base import Tool
+from signal_chatbot.tools.base import Tool, ToolContext, ToolOutcome
 from signal_chatbot.tools.registry import ToolRegistry
 
-__all__ = ["Tool", "ToolRegistry"]
+__all__ = ["Tool", "ToolContext", "ToolOutcome", "ToolRegistry"]

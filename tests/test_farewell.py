@@ -7,7 +7,7 @@ from signal_chatbot.state import DirectiveSet
 
 
 def _empty_directives() -> DirectiveSet:
-    return DirectiveSet(patches=[], rules=[], lore=[])
+    return DirectiveSet(rules=[], lore=[])
 
 
 class FakeClient:

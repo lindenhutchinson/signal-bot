@@ -17,11 +17,12 @@ from typing import Protocol
 
 from signal_chatbot.commands.parser import Command, parse
 from signal_chatbot.history import HistoryStore
-from signal_chatbot.llm.conversation import BotReply
 from signal_chatbot.llm.prompt import BOT_SENDER, build_messages
+from signal_chatbot.llm.reply import BotReply
 from signal_chatbot.lobotomy import Lobotomiser
 from signal_chatbot.logging import get_logger
 from signal_chatbot.state import DirectiveSet, LoggedCommand
+from signal_chatbot.tools import ToolContext
 from signal_chatbot.transport.models import IncomingMessage, OutgoingMessage
 
 log = get_logger(__name__)
@@ -47,7 +48,9 @@ _UNPROMPTED_NUDGE = (
 class Responder(Protocol):
     """The LLM-facing dependency the bot needs (satisfied by Conversation)."""
 
-    async def respond(self, messages: list[dict], *, armed: bool = False) -> BotReply: ...
+    async def respond(
+        self, messages: list[dict], ctx: ToolContext, *, armed: bool = False
+    ) -> BotReply: ...
 
 
 class Sender(Protocol):
@@ -66,17 +69,27 @@ class Commands(Protocol):
     async def handle(self, command: Command, message: IncomingMessage) -> str: ...
 
 
-class StateReader(Protocol):
-    """The state slice the reply path reads and updates (satisfied by StateStore)."""
+class Directives(Protocol):
+    """Read-only view of a group's directives (satisfied by DirectiveStore)."""
 
     async def directives(self, group_id: str) -> DirectiveSet: ...
+
+
+class CommandActivity(Protocol):
+    """Read-only view of the command-event log (satisfied by CommandLog)."""
+
     async def recent_commands(self, group_id: str) -> list[LoggedCommand]: ...
+
+
+class Arming(Protocol):
+    """The self-destruct arming flag the reply path reads and sets (satisfied by ArmingStore)."""
+
     async def is_suicide_armed(self, group_id: str) -> bool: ...
     async def arm_suicide(self, group_id: str, *, at: int) -> None: ...
 
 
 class DisclaimerLog(Protocol):
-    """Sink for the asides the bot attaches to replies (satisfied by StateStore)."""
+    """Sink for the asides the bot attaches to replies (satisfied by DisclaimerStore)."""
 
     async def add_disclaimer(
         self, group_id: str, *, message: str, disclaimer: str, created_at: int
@@ -100,7 +113,9 @@ class Bot:
         history: HistoryStore,
         conversation: Responder,
         commands: Commands,
-        state: StateReader,
+        directives: Directives,
+        command_log: CommandActivity,
+        arming: Arming,
         disclaimers: DisclaimerLog,
         lobotomiser: Lobotomiser,
         name: NameSource,
@@ -117,7 +132,9 @@ class Bot:
         self._history = history
         self._conversation = conversation
         self._commands = commands
-        self._state = state
+        self._directives = directives
+        self._command_log = command_log
+        self._arming = arming
         self._disclaimers = disclaimers
         self._lobotomiser = lobotomiser
         self._name = name
@@ -188,10 +205,10 @@ class Bot:
 
     async def _reply(self, group_id: str, timestamp: int, *, unprompted: bool = False) -> None:
         try:
-            armed = await self._state.is_suicide_armed(group_id)
+            armed = await self._arming.is_suicide_armed(group_id)
             history = await self._history.recent(group_id)
-            directives = await self._state.directives(group_id)
-            command_log = await self._state.recent_commands(group_id)
+            directives = await self._directives.directives(group_id)
+            command_log = await self._command_log.recent_commands(group_id)
             messages = build_messages(
                 self._system_prompt,
                 history,
@@ -201,7 +218,8 @@ class Bot:
             )
             if unprompted:
                 messages.append({"role": "user", "content": _UNPROMPTED_NUDGE})
-            reply = await self._conversation.respond(messages, armed=armed)
+            ctx = ToolContext(group_id=group_id, timestamp=timestamp)
+            reply = await self._conversation.respond(messages, ctx, armed=armed)
         except Exception as exc:  # noqa: BLE001 - never let one message kill the loop
             log.error("bot.reply_failed", group=group_id, error=str(exc))
             reply = BotReply(message="")
@@ -224,10 +242,15 @@ class Bot:
         await self._signal.send(OutgoingMessage(group_id=group_id, text=sent))
         await self._history.append(group_id, sender=BOT_SENDER, text=text, timestamp=timestamp)
 
+        # Tool-produced announcements are public, sent as their own messages AFTER the
+        # main reply, and (like the footer) kept OUT of history so the model can't fake them.
+        for announcement in reply.announcements:
+            await self._signal.send(OutgoingMessage(group_id=group_id, text=announcement))
+
         # The bot pulled the trigger this turn: arm the kill so confirm_kill_self unlocks
         # next time it's summoned, giving the group a window to talk it down first.
         if reply.attempted_self_destruct:
-            await self._state.arm_suicide(group_id, at=timestamp)
+            await self._arming.arm_suicide(group_id, at=timestamp)
             log.info("bot.self_destruct_armed", group=group_id)
 
     def _self_destruct_warning(self) -> str:

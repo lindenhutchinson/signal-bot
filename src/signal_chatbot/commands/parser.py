@@ -2,8 +2,8 @@
 
 Commands are start-anchored (the first whitespace token is the command word) and
 case-insensitive on that word, so the substring-anywhere ``@bot`` trigger never
-collides. The first token is matched exactly, so ``@patchlist`` never matches
-``@patch``.
+collides. The first token is matched exactly, so ``@rulelist`` never matches
+``@rule``.
 """
 
 from __future__ import annotations
@@ -13,11 +13,9 @@ from enum import StrEnum
 
 
 class CommandName(StrEnum):
-    PATCH = "patch"
     RULE = "rule"
     LORE = "lore"
     NAME = "name"
-    PATCHLIST = "patchlist"
     RULELIST = "rulelist"
     LORELIST = "lorelist"
     DISCLAIMERS = "disclaimers"

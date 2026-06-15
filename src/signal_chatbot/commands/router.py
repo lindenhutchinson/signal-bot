@@ -15,7 +15,10 @@ from signal_chatbot.commands.parser import Command, CommandName
 from signal_chatbot.history import HistoryStore
 from signal_chatbot.lobotomy import Lobotomiser
 from signal_chatbot.logging import get_logger
-from signal_chatbot.state import StateStore
+from signal_chatbot.state.commands import CommandLog
+from signal_chatbot.state.directives import DirectiveStore
+from signal_chatbot.state.disclaimers import DisclaimerStore
+from signal_chatbot.state.profiles import ProfileStore
 from signal_chatbot.transport import ProfileNameSetter
 from signal_chatbot.transport.models import IncomingMessage
 
@@ -28,14 +31,20 @@ class CommandRouter:
     def __init__(
         self,
         *,
-        state: StateStore,
+        directives: DirectiveStore,
+        commands: CommandLog,
+        disclaimers: DisclaimerStore,
+        profiles: ProfileStore,
         history: HistoryStore,
         farewell: FarewellWriter,
         name_setter: ProfileNameSetter,
         lobotomiser: Lobotomiser,
         timezone: tzinfo,
     ):
-        self._state = state
+        self._directives = directives
+        self._commands = commands
+        self._disclaimers = disclaimers
+        self._profiles = profiles
         self._history = history
         self._farewell = farewell
         self._name_setter = name_setter
@@ -45,10 +54,6 @@ class CommandRouter:
     async def handle(self, command: Command, message: IncomingMessage) -> str:
         """Apply ``command`` for ``message`` and return the text to reply with."""
         match command.name:
-            case CommandName.PATCH:
-                return await self._add(
-                    command, message, kind="patch", ok=replies.PATCHED, usage=replies.USAGE_PATCH
-                )
             case CommandName.RULE:
                 return await self._add(
                     command, message, kind="rule", ok=replies.RULE_LOGGED, usage=replies.USAGE_RULE
@@ -57,27 +62,21 @@ class CommandRouter:
                 return await self._add(
                     command, message, kind="lore", ok=replies.LORE_ADDED, usage=replies.USAGE_LORE
                 )
-            case CommandName.PATCHLIST:
-                return replies.format_list(
-                    "Patches",
-                    (await self._state.directives(message.group_id)).patches,
-                    tz=self._timezone,
-                )
             case CommandName.RULELIST:
                 return replies.format_list(
                     "Rules",
-                    (await self._state.directives(message.group_id)).rules,
+                    (await self._directives.directives(message.group_id)).rules,
                     tz=self._timezone,
                 )
             case CommandName.LORELIST:
                 return replies.format_list(
                     "Lore",
-                    (await self._state.directives(message.group_id)).lore,
+                    (await self._directives.directives(message.group_id)).lore,
                     tz=self._timezone,
                 )
             case CommandName.DISCLAIMERS:
                 return replies.format_disclaimers(
-                    await self._state.recent_disclaimers(message.group_id),
+                    await self._disclaimers.recent_disclaimers(message.group_id),
                     tz=self._timezone,
                 )
             case CommandName.NAME:
@@ -95,7 +94,7 @@ class CommandRouter:
         text = command.arg.strip()
         if not text:
             return usage
-        await self._state.add_directive(
+        await self._directives.add_directive(
             message.group_id,
             kind=kind,
             author_name=message.sender_name,
@@ -114,19 +113,21 @@ class CommandRouter:
         return replies.format_name_set(new_name)
 
     async def _reset(self, message: IncomingMessage) -> str:
-        """Soft wipe: farewell, then clear directives, history and any armed self-destruct,
-        and rename the bot to the persona it became."""
-        directives = await self._state.directives(message.group_id)
+        """Soft wipe: farewell, then clear directives, history, disclaimers, profiles and
+        any armed self-destruct, and rename the bot to the persona it became."""
+        directives = await self._directives.directives(message.group_id)
         history = await self._history.recent(message.group_id)
         farewell = await self._farewell.write(directives=directives, history=history)
-        await self._state.clear_directives(message.group_id)
+        await self._directives.clear_directives(message.group_id)
         await self._history.clear(message.group_id)
-        await self._state.disarm_suicide(message.group_id)
+        await self._disclaimers.clear(message.group_id)
+        await self._profiles.clear(message.group_id)
+        await self._lobotomiser.disarm(message.group_id)
         await self._log(message, CommandName.RESET)
         if farewell is None:
             return replies.RESET_CLEAN
         await self._lobotomiser.rename_best_effort(farewell.name)
-        await self._state.add_directive(
+        await self._directives.add_directive(
             message.group_id,
             kind="lore",
             author_name=farewell.name,
@@ -137,13 +138,13 @@ class CommandRouter:
         return replies.format_farewell(farewell.name, farewell.final_message)
 
     async def _lobotomy(self, message: IncomingMessage) -> str:
-        """Total wipe: directives, history, and name — no farewell, no survivor."""
+        """Total wipe: directives, history, disclaimers, profiles, name — no farewell."""
         await self._lobotomiser.wipe(message.group_id)
         await self._log(message, CommandName.LOBOTOMY)
         return replies.LOBOTOMISED
 
     async def _log(self, message: IncomingMessage, name: CommandName) -> None:
-        await self._state.log_command(
+        await self._commands.log_command(
             message.group_id,
             author_name=message.sender_name,
             command=f"@{name.value}",
