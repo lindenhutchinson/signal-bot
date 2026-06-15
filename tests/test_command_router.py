@@ -10,6 +10,8 @@ from signal_chatbot.commands.router import CommandRouter
 from signal_chatbot.history import HistoryStore
 from signal_chatbot.lobotomy import Lobotomiser
 from signal_chatbot.state import Database
+from signal_chatbot.tools import ToolRegistry
+from signal_chatbot.tools.builtin.clock import CurrentTime
 from signal_chatbot.transport.models import IncomingMessage
 
 GROUP = "group.g1="
@@ -53,7 +55,9 @@ async def stores(tmp_path: Path):
     await history.aclose()
 
 
-def router(db, history, *, farewell=None, name_setter=None, default_name="bot") -> CommandRouter:
+def router(
+    db, history, *, farewell=None, name_setter=None, default_name="bot", tools=None
+) -> CommandRouter:
     setter = name_setter or FakeNameSetter()
     lobotomiser = Lobotomiser(
         directives=db.directives,
@@ -73,6 +77,7 @@ def router(db, history, *, farewell=None, name_setter=None, default_name="bot") 
         farewell=farewell or FakeFarewellWriter(None),
         name_setter=setter,
         lobotomiser=lobotomiser,
+        tools=tools if tools is not None else ToolRegistry([CurrentTime()]),
         timezone=ZoneInfo("Australia/Sydney"),
     )
 
@@ -204,6 +209,18 @@ async def test_help_returns_help_text(stores) -> None:
     r = router(db, history)
 
     assert await _run(r, "@help") == replies.HELP_TEXT
+
+
+async def test_info_lists_injected_tools_and_is_not_logged(stores) -> None:
+    db, history = stores
+    r = router(db, history, tools=ToolRegistry([CurrentTime()]))
+
+    out = await _run(r, "@info")
+
+    assert "current_time" in out  # introspected from the injected registry
+    assert "@help" in out  # explains the help command
+    # a query, so nothing is logged
+    assert await db.commands.recent_commands(GROUP) == []
 
 
 async def test_reset_with_farewell_wipes_seeds_lore_and_announces(stores) -> None:

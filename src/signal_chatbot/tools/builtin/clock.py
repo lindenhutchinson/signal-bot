@@ -16,6 +16,7 @@ from signal_chatbot.tools.base import Tool, ToolContext
 class CurrentTime(Tool):
     name = "current_time"
     description = "Get the current date and time, optionally in a given IANA timezone."
+    summary = "Check the current date and time."
 
     class Args(BaseModel):
         timezone: str = Field(

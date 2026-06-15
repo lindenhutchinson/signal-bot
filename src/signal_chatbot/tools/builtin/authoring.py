@@ -65,6 +65,7 @@ class AddRule(_AddDirective):
         "constraint you will follow from now on. Everyone sees it announced. Use it "
         "deliberately and rarely; it cannot be undone except by a reset."
     )
+    summary = "Give itself a new hard rule."
     _kind = "rule"
     _announcement = '⚖️ {name} added a rule: "{text}"'
 
@@ -76,5 +77,6 @@ class AddLore(_AddDirective):
         "bit of history that will be treated as true from now on. Everyone sees it "
         "announced. Use it deliberately; it cannot be undone except by a reset."
     )
+    summary = "Add to its own backstory/lore."
     _kind = "lore"
     _announcement = '📜 {name} added lore: "{text}"'

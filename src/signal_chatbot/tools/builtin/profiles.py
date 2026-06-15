@@ -21,6 +21,7 @@ class RememberAboutUser(Tool):
         "someone — a preference, a fact about their life, a running joke. It is private: it "
         "is NOT announced to the group, only kept in your own memory."
     )
+    summary = "Remember a fact about someone."
 
     class Args(BaseModel):
         about: str = Field(description="The person's name, exactly as it appears in chat.")

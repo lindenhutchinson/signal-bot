@@ -24,6 +24,7 @@ class CommandName(StrEnum):
     RESET = "reset"
     LOBOTOMY = "lobotomy"
     HELP = "help"
+    INFO = "info"
 
 
 @dataclass(frozen=True, slots=True)

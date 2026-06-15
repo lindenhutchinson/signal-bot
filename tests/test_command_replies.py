@@ -77,6 +77,18 @@ def test_forget_replies() -> None:
     assert replies.no_such_profile("Dave") == "I don't have anything on Dave."
 
 
+def test_format_info_explains_help_lists_tools_and_notes_self_destruct() -> None:
+    out = replies.format_info(
+        [("current_time", "Check the current date and time."), ("web_search", "Search the web.")]
+    )
+
+    assert "@help" in out  # explains what @help is for
+    assert "current_time — Check the current date and time." in out
+    assert "web_search — Search the web." in out
+    # the self-destruct ability lives outside the registry, so it is mentioned explicitly
+    assert "end myself" in out
+
+
 def test_help_text_lists_every_command() -> None:
     for token in (
         "@rule",
@@ -90,6 +102,7 @@ def test_help_text_lists_every_command() -> None:
         "@reset",
         "@lobotomy",
         "@help",
+        "@info",
     ):
         assert token in replies.HELP_TEXT
 

@@ -9,6 +9,7 @@ CTX = ToolContext(group_id="g1", timestamp=1)
 class Echo(Tool):
     name = "echo"
     description = "Echo the given text back."
+    summary = "Echo text."
 
     class Args(BaseModel):
         text: str
@@ -110,3 +111,30 @@ def test_definitions_returns_all_registered_tools() -> None:
 def test_duplicate_tool_names_are_rejected() -> None:
     with pytest.raises(ValueError, match="duplicate"):
         ToolRegistry([Echo(), Echo()])
+
+
+def test_summaries_returns_name_summary_pairs_in_registration_order() -> None:
+    class Other(Tool):
+        name = "other"
+        description = "Another tool."
+        summary = "Do something else."
+
+        class Args(BaseModel):
+            pass
+
+        async def run(self, args: "Other.Args", ctx: ToolContext) -> str:
+            return "ok"
+
+    registry = ToolRegistry([Echo(), Other()])
+
+    assert registry.summaries() == [("echo", "Echo text."), ("other", "Do something else.")]
+
+
+def test_real_tools_expose_non_empty_summaries() -> None:
+    from signal_chatbot.tools.builtin.authoring import AddLore, AddRule
+    from signal_chatbot.tools.builtin.clock import CurrentTime
+
+    for name, summary in ToolRegistry([CurrentTime()]).summaries():
+        assert name and summary.strip()
+    assert AddRule.summary.strip()
+    assert AddLore.summary.strip()

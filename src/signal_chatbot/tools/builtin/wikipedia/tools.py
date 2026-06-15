@@ -21,6 +21,7 @@ class WikipediaSearch(Tool):
         "snippets. Use this first to find the right article (and to disambiguate, e.g. "
         "'Mercury' the planet vs the element), then read it with wikipedia_article."
     )
+    summary = "Search Wikipedia."
 
     class Args(BaseModel):
         query: str = Field(description="What to search for, e.g. 'James Webb telescope'.")
@@ -42,6 +43,7 @@ class WikipediaArticle(Tool):
         "By default returns the intro. Set full=true to also get a table of contents of the "
         "article's sections, then pass a section name or number to read that section."
     )
+    summary = "Read a Wikipedia article."
 
     class Args(BaseModel):
         title: str = Field(description="Exact article title, e.g. 'Mercury (planet)'.")

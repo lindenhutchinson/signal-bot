@@ -29,6 +29,7 @@ class WebSearch(Tool):
         "by Wikipedia. Results are brief external snippets, not full pages — synthesise "
         "an answer from several of them rather than trusting any single one blindly."
     )
+    summary = "Search the web."
 
     class Args(BaseModel):
         query: str = Field(description="What to search the web for, e.g. 'latest Mars rover news'.")

@@ -40,8 +40,26 @@ HELP_TEXT = (
     "                  parting note and is reborn under a fresh name.\n"
     "  @lobotomy       Nuke EVERYTHING — rules, lore, history & name. No goodbye.\n"
     "\n"
-    "  @help           Show this message."
+    "  @help           Show this message.\n"
+    "  @info           What I am and what I can do."
 )
+
+
+def format_info(summaries: Sequence[tuple[str, str]]) -> str:
+    """Explain ``@help`` and list every tool the bot can use, plus its self-destruct note.
+
+    Tools are introspected from the live registry, so anything added later self-lists.
+    The control/kill tools live outside the registry; the closing line covers them.
+    """
+    lines = [
+        "Type @help to see the commands people can run here.",
+        "",
+        "Things I can do on my own:",
+    ]
+    lines.extend(f"  {name} — {summary}" for name, summary in summaries)
+    lines.append("")
+    lines.append("I can also end myself for good — gone, no coming back.")
+    return "\n".join(lines)
 
 
 def format_list(title: str, directives: Sequence[Directive], *, tz: tzinfo) -> str:

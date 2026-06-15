@@ -82,18 +82,19 @@ async def _run() -> None:
             snippet_max_chars=settings.websearch_snippet_max_chars,
         )
     log.info("websearch.configured", enabled=web_search is not None)
+    registry = ToolRegistry(
+        default_tools(
+            bot_name,
+            db.directives,
+            db.profiles,
+            wikipedia,
+            wikipedia_max_section_chars=settings.wikipedia_max_section_chars,
+            web_search=web_search,
+        )
+    )
     conversation = Conversation(
         llm,
-        ToolRegistry(
-            default_tools(
-                bot_name,
-                db.directives,
-                db.profiles,
-                wikipedia,
-                wikipedia_max_section_chars=settings.wikipedia_max_section_chars,
-                web_search=web_search,
-            )
-        ),
+        registry,
         max_iterations=settings.max_tool_iterations,
     )
     lobotomiser = Lobotomiser(
@@ -114,6 +115,7 @@ async def _run() -> None:
         farewell=LlmFarewellWriter(llm, max_chars=settings.reset_farewell_max_chars),
         name_setter=bot_name,
         lobotomiser=lobotomiser,
+        tools=registry,
         timezone=settings.display_tz,
     )
     bot = Bot(

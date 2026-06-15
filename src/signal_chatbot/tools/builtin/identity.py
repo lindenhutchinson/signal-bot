@@ -17,6 +17,7 @@ class SetName(Tool):
         "in will see. It is account-global and persists until changed again. Use it when it "
         "fits the moment, not constantly."
     )
+    summary = "Change its own display name."
 
     class Args(BaseModel):
         name: str = Field(description="Your new display name, e.g. 'Greg'. Keep it short.")

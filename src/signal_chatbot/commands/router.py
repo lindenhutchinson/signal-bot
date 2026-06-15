@@ -19,6 +19,7 @@ from signal_chatbot.state.commands import CommandLog
 from signal_chatbot.state.directives import DirectiveStore
 from signal_chatbot.state.disclaimers import DisclaimerStore
 from signal_chatbot.state.profiles import ProfileStore
+from signal_chatbot.tools import ToolRegistry
 from signal_chatbot.transport import ProfileNameSetter
 from signal_chatbot.transport.models import IncomingMessage
 
@@ -39,6 +40,7 @@ class CommandRouter:
         farewell: FarewellWriter,
         name_setter: ProfileNameSetter,
         lobotomiser: Lobotomiser,
+        tools: ToolRegistry,
         timezone: tzinfo,
     ):
         self._directives = directives
@@ -49,6 +51,7 @@ class CommandRouter:
         self._farewell = farewell
         self._name_setter = name_setter
         self._lobotomiser = lobotomiser
+        self._tools = tools
         self._timezone = timezone
 
     async def handle(self, command: Command, message: IncomingMessage) -> str:
@@ -91,6 +94,8 @@ class CommandRouter:
                 return await self._lobotomy(message)
             case CommandName.HELP:
                 return replies.HELP_TEXT
+            case CommandName.INFO:
+                return replies.format_info(self._tools.summaries())
 
     async def _add(
         self, command: Command, message: IncomingMessage, *, kind: str, ok: str, usage: str

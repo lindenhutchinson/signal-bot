@@ -31,6 +31,10 @@ def test_forget_parses_with_and_without_a_name() -> None:
     assert parse("@forget Dave") == Command(CommandName.FORGET, "Dave")
 
 
+def test_info_parses_with_no_argument() -> None:
+    assert parse("@info") == Command(CommandName.INFO, "")
+
+
 def test_non_command_text_returns_none() -> None:
     assert parse("just chatting") is None
     assert parse("@bot what's up") is None

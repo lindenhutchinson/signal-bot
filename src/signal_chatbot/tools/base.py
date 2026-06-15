@@ -42,10 +42,17 @@ class ToolOutcome:
 
 
 class Tool(ABC):
-    """Base class for a callable tool exposed to the LLM."""
+    """Base class for a callable tool exposed to the LLM.
+
+    Every concrete tool must set three class attributes: ``name``, the verbose
+    model-facing ``description`` (advertised to the LLM), and ``summary`` — a SHORT
+    human-facing one-liner shown to people via ``@info`` (distinct from, and far
+    terser than, ``description``).
+    """
 
     name: str
     description: str
+    summary: str
 
     class Args(BaseModel):
         """Override with the tool's parameters. Defaults to no arguments."""

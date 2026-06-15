@@ -32,6 +32,13 @@ class ToolRegistry:
         """Return OpenAI-format tool definitions for every registered tool."""
         return [tool.definition() for tool in self._tools.values()]
 
+    def summaries(self) -> list[tuple[str, str]]:
+        """Return ``(name, summary)`` for each registered tool, in registration order.
+
+        This is what ``@info`` introspects, so any tool added later self-lists.
+        """
+        return [(tool.name, tool.summary) for tool in self._tools.values()]
+
     @property
     def is_empty(self) -> bool:
         return not self._tools
