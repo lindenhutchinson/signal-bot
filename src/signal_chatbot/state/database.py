@@ -1,11 +1,11 @@
 """The connection lifecycle + schema bootstrap shared by the state sub-stores.
 
 ``Database`` owns one ``aiosqlite`` connection and exposes the focused sub-stores
-(``directives``, ``commands``, ``disclaimers``, ``arming``, ``profiles``) as
-attributes. Each sub-store owns exactly one table and contributes a ``SCHEMA``
-constant the database runs on connect, so adding new state later is a new store
-file plus one line here. ``HistoryStore`` is deliberately NOT part of this — it
-keeps its own connection.
+(``directives``, ``commands``, ``disclaimers``, ``flags``, ``profiles``,
+``final_words``) as attributes. Each sub-store owns exactly one table and
+contributes a ``SCHEMA`` constant the database runs on connect, so adding new
+state later is a new store file plus one line here. ``HistoryStore`` is
+deliberately NOT part of this — it keeps its own connection.
 """
 
 from __future__ import annotations
@@ -14,10 +14,11 @@ from pathlib import Path
 
 import aiosqlite
 
-from signal_chatbot.state.arming import ArmingStore
 from signal_chatbot.state.commands import CommandLog
 from signal_chatbot.state.directives import DirectiveStore
 from signal_chatbot.state.disclaimers import DisclaimerStore
+from signal_chatbot.state.finalwords import FinalWordsStore
+from signal_chatbot.state.flags import FlagStore
 from signal_chatbot.state.profiles import ProfileStore
 
 
@@ -31,8 +32,9 @@ class Database:
         self.directives: DirectiveStore
         self.commands: CommandLog
         self.disclaimers: DisclaimerStore
-        self.arming: ArmingStore
+        self.flags: FlagStore
         self.profiles: ProfileStore
+        self.final_words: FinalWordsStore
 
     async def connect(self) -> None:
         """Open the database, build the sub-stores, and ensure every schema exists."""
@@ -45,15 +47,17 @@ class Database:
         self.directives = DirectiveStore(conn)
         self.commands = CommandLog(conn, window=self._window)
         self.disclaimers = DisclaimerStore(conn, window=self._window)
-        self.arming = ArmingStore(conn)
+        self.flags = FlagStore(conn)
         self.profiles = ProfileStore(conn)
+        self.final_words = FinalWordsStore(conn)
 
         for store in (
             self.directives,
             self.commands,
             self.disclaimers,
-            self.arming,
+            self.flags,
             self.profiles,
+            self.final_words,
         ):
             await conn.executescript(store.SCHEMA)
         await conn.commit()

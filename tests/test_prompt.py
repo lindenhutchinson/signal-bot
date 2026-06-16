@@ -2,9 +2,20 @@ from zoneinfo import ZoneInfo
 
 from signal_chatbot.history import StoredMessage
 from signal_chatbot.llm.prompt import BOT_SENDER, build_messages, quotable_history
-from signal_chatbot.state import Directive, DirectiveSet, LoggedCommand, Profile
+from signal_chatbot.state import Directive, DirectiveSet, FinalWords, LoggedCommand, Profile
 
 SYDNEY = ZoneInfo("Australia/Sydney")
+
+
+def test_final_words_section_renders_when_present_and_is_omitted_when_empty() -> None:
+    final_words = [FinalWords(name="Greg", text="Beware Dave.", created_at=1781274720000)]
+
+    with_words = build_messages("BASE", [], timezone=SYDNEY, final_words=final_words)[0]["content"]
+    without = build_messages("BASE", [], timezone=SYDNEY, final_words=[])[0]["content"]
+
+    assert "## Final words of those who came before you" in with_words
+    assert '- Greg: "Beware Dave."' in with_words
+    assert "## Final words" not in without
 
 
 def _directive(kind: str, text: str) -> Directive:

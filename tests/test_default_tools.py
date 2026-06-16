@@ -25,25 +25,43 @@ def _names(tools) -> set[str]:
     return {d["function"]["name"] for d in ToolRegistry(tools).definitions()}
 
 
-async def test_default_tools_registers_authoring_tools(directives) -> None:
+def _build(directives, **kw):
+    """default_tools with the stateful deps stubbed as None (only names are inspected)."""
     name = BotName(FakeNameSetter(), initial="Bot")
-    tools = default_tools(name, directives, None, None, wikipedia_max_section_chars=100)  # type: ignore[arg-type]
+    return default_tools(
+        name,
+        directives,
+        None,  # profiles
+        None,  # flags
+        None,  # reactions
+        None,  # wikipedia
+        wikipedia_max_section_chars=100,
+        **kw,
+    )  # type: ignore[arg-type]
 
-    assert {"add_rule", "add_lore", "set_name"} <= _names(tools)
+
+async def test_default_tools_registers_authoring_tools(directives) -> None:
+    assert {"add_rule", "add_lore", "set_name"} <= _names(_build(directives))
 
 
 async def test_default_tools_registers_remember_about_user(directives) -> None:
-    name = BotName(FakeNameSetter(), initial="Bot")
-    tools = default_tools(name, directives, None, None, wikipedia_max_section_chars=100)  # type: ignore[arg-type]
+    assert "remember_about_user" in _names(_build(directives))
 
-    assert "remember_about_user" in _names(tools)
+
+async def test_default_tools_registers_listen_and_reaction(directives) -> None:
+    assert {"listen_for_reply", "send_reaction"} <= _names(_build(directives))
+
+
+async def test_seize_control_is_offered_to_the_model_but_hidden_from_info(directives) -> None:
+    registry = ToolRegistry(_build(directives))
+    # offered to the model (in the tool definitions)...
+    assert "seize_control" in {d["function"]["name"] for d in registry.definitions()}
+    # ...but never listed for humans via @info
+    assert "seize_control" not in {n for n, _ in registry.summaries()}
 
 
 async def test_web_search_included_only_when_provided(directives) -> None:
-    name = BotName(FakeNameSetter(), initial="Bot")
-
-    without = default_tools(name, directives, None, None, wikipedia_max_section_chars=100)  # type: ignore[arg-type]
-    assert "web_search" not in _names(without)
+    assert "web_search" not in _names(_build(directives))
 
     class _StubWebSearch:
         name = "web_search"
@@ -52,12 +70,5 @@ async def test_web_search_included_only_when_provided(directives) -> None:
         def definition(self) -> dict:
             return {"type": "function", "function": {"name": "web_search", "parameters": {}}}
 
-    with_search = default_tools(
-        name,
-        directives,
-        None,  # type: ignore[arg-type]
-        None,  # type: ignore[arg-type]
-        wikipedia_max_section_chars=100,
-        web_search=_StubWebSearch(),  # type: ignore[arg-type]
-    )
+    with_search = _build(directives, web_search=_StubWebSearch())
     assert "web_search" in _names(with_search)

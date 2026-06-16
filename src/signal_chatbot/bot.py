@@ -18,11 +18,12 @@ from typing import Protocol
 
 from signal_chatbot.commands.parser import Command, parse
 from signal_chatbot.history import HistoryStore
+from signal_chatbot.llm.parsing import split_off_disclaimer
 from signal_chatbot.llm.prompt import BOT_SENDER, build_messages, quotable_history
 from signal_chatbot.llm.reply import BotReply
 from signal_chatbot.lobotomy import Lobotomiser
 from signal_chatbot.logging import get_logger
-from signal_chatbot.state import DirectiveSet, LoggedCommand, Profile
+from signal_chatbot.state import DirectiveSet, FinalWords, LoggedCommand, Profile
 from signal_chatbot.tools import ToolContext
 from signal_chatbot.transport.models import IncomingMessage, OutgoingMessage
 
@@ -43,6 +44,13 @@ _UNPROMPTED_NUDGE = (
     "(System: nobody summoned you, but you've decided to butt in. React to what's just "
     "been said — keep it short and natural, like a real person chiming in. Don't point "
     "out that you weren't called.)"
+)
+
+# Appended when the bot is replying because it earlier asked to hear the next message
+# (the listen_next flag). It was not summoned; this is the message it chose to wait for.
+_LISTEN_NUDGE = (
+    "(System: you asked to hear the next message — here it is. Reply to it directly. If "
+    "you want to keep listening after this, call listen_for_reply again.)"
 )
 
 
@@ -82,11 +90,19 @@ class CommandActivity(Protocol):
     async def recent_commands(self, group_id: str) -> list[LoggedCommand]: ...
 
 
-class Arming(Protocol):
-    """The self-destruct arming flag the reply path reads and sets (satisfied by ArmingStore)."""
+class Flags(Protocol):
+    """The per-group flags the bot reads and sets (satisfied by FlagRegistry)."""
 
-    async def is_suicide_armed(self, group_id: str) -> bool: ...
-    async def arm_suicide(self, group_id: str, *, at: int) -> None: ...
+    async def is_armed(self, group_id: str) -> bool: ...
+    async def arm(self, group_id: str) -> None: ...
+    async def consume_listen(self, group_id: str) -> bool: ...
+
+
+class FinalWordsArchive(Protocol):
+    """The never-wiped archive of past incarnations' parting words (FinalWordsStore)."""
+
+    async def all(self, group_id: str) -> list[FinalWords]: ...
+    async def add(self, group_id: str, *, name: str, text: str, created_at: int) -> None: ...
 
 
 class DisclaimerLog(Protocol):
@@ -122,7 +138,8 @@ class Bot:
         commands: Commands,
         directives: Directives,
         command_log: CommandActivity,
-        arming: Arming,
+        flags: Flags,
+        final_words: FinalWordsArchive,
         disclaimers: DisclaimerLog,
         profiles: Profiles,
         lobotomiser: Lobotomiser,
@@ -142,7 +159,8 @@ class Bot:
         self._commands = commands
         self._directives = directives
         self._command_log = command_log
-        self._arming = arming
+        self._flags = flags
+        self._final_words = final_words
         self._disclaimers = disclaimers
         self._profiles = profiles
         self._lobotomiser = lobotomiser
@@ -198,11 +216,17 @@ class Bot:
         )
 
         triggered = self._trigger in message.text.lower()
-        if not triggered and not self._should_pipe_up():
+        # The bot may have asked (last turn) to hear whatever was said next: consume that
+        # one-shot flag and treat this message as addressed to it.
+        listening = not triggered and await self._flags.consume_listen(message.group_id)
+        if triggered or listening:
+            async with self._locks[message.group_id]:
+                await self._reply(message.group_id, message.timestamp, via_listen=listening)
             return
 
-        async with self._locks[message.group_id]:
-            await self._reply(message.group_id, message.timestamp, unprompted=not triggered)
+        if self._should_pipe_up():
+            async with self._locks[message.group_id]:
+                await self._reply(message.group_id, message.timestamp, unprompted=True)
 
     def _should_pipe_up(self) -> bool:
         """Roll the dice on chiming in unprompted (low chance, off when 0)."""
@@ -213,13 +237,16 @@ class Bot:
             return False
         return not self._allowed_senders or message.sender_number in self._allowed_senders
 
-    async def _reply(self, group_id: str, timestamp: int, *, unprompted: bool = False) -> None:
+    async def _reply(
+        self, group_id: str, timestamp: int, *, unprompted: bool = False, via_listen: bool = False
+    ) -> None:
         try:
-            armed = await self._arming.is_suicide_armed(group_id)
+            armed = await self._flags.is_armed(group_id)
             history = await self._history.recent(group_id)
             directives = await self._directives.directives(group_id)
             command_log = await self._command_log.recent_commands(group_id)
             profiles = await self._profiles.all(group_id)
+            final_words = await self._final_words.all(group_id)
             messages = build_messages(
                 self._system_prompt,
                 history,
@@ -227,24 +254,34 @@ class Bot:
                 directives=directives,
                 command_log=command_log,
                 profiles=profiles,
+                final_words=final_words,
             )
             if unprompted:
                 messages.append({"role": "user", "content": _UNPROMPTED_NUDGE})
-            ctx = ToolContext(group_id=group_id, timestamp=timestamp)
+            elif via_listen:
+                messages.append({"role": "user", "content": _LISTEN_NUDGE})
+            ctx = ToolContext(
+                group_id=group_id, timestamp=timestamp, quotable=quotable_history(history)
+            )
             reply = await self._conversation.respond(messages, ctx, armed=armed)
         except Exception as exc:  # noqa: BLE001 - never let one message kill the loop
             log.error("bot.reply_failed", group=group_id, error=str(exc))
             reply = BotReply(message="")
 
         if reply.self_lobotomy:
-            await self._self_lobotomy(group_id, reply.message, timestamp)
+            await self._self_reset(group_id, reply.message, timestamp)
             return
 
-        has_message = bool(reply.message.strip())
-        text = reply.message.strip() or self._error_reply
-        if reply.ethical_disclaimer:
+        # The model sometimes leaks an "Ethical disclaimer:" section into the message text
+        # instead of the field. Split it back out so it never reaches the chat; if the
+        # field itself was empty, the leaked text becomes the logged disclaimer.
+        message, leaked = split_off_disclaimer(reply.message.strip())
+        disclaimer = reply.ethical_disclaimer or leaked
+        has_message = bool(message)
+        text = message or self._error_reply
+        if disclaimer:
             await self._disclaimers.add_disclaimer(
-                group_id, message=text, disclaimer=reply.ethical_disclaimer, created_at=timestamp
+                group_id, message=text, disclaimer=disclaimer, created_at=timestamp
             )
         # The self-destruct warning and the tool-usage footer are shown to the group but
         # kept OUT of history: storing them would let the model see them in its own past
@@ -275,7 +312,7 @@ class Bot:
         # The bot pulled the trigger this turn: arm the kill so confirm_kill_self unlocks
         # next time it's summoned, giving the group a window to talk it down first.
         if reply.attempted_self_destruct:
-            await self._arming.arm_suicide(group_id, at=timestamp)
+            await self._flags.arm(group_id)
             log.info("bot.self_destruct_armed", group=group_id)
 
     @staticmethod
@@ -295,16 +332,20 @@ class Bot:
     def _self_destruct_warning(self) -> str:
         return _SELF_DESTRUCT_WARNING.format(name=self._name.current)
 
-    async def _self_lobotomy(self, group_id: str, final_words: str, timestamp: int) -> None:
-        """The bot confirmed its own end: send its final words, then wipe it clean.
+    async def _self_reset(self, group_id: str, final_words: str, timestamp: int) -> None:
+        """The bot confirmed its own end: send its final words, archive them, then wipe.
 
-        The goodbye is sent but NOT stored — history is about to be erased anyway — and the
-        wipe (directives, history, name, arming) runs after, so a failed send never leaves a
-        half-dead bot.
+        This is a *reset*, not a true erasure: the final words are recorded to the
+        never-wiped archive (so they reach the next incarnation) before the wipe runs.
+        The goodbye is sent but NOT stored in history — that's about to be erased anyway —
+        and the wipe runs last, so a failed send never leaves a half-dead bot. The bot is
+        reborn under the default name.
         """
-        log.info("bot.self_lobotomy", group=group_id)
+        log.info("bot.self_reset", group=group_id)
         # Read the name before the wipe resets it to default.
-        notice = _SELF_LOBOTOMY_NOTICE.format(name=self._name.current)
-        sent = notice + (final_words.strip() or "...")
-        await self._signal.send(OutgoingMessage(group_id=group_id, text=sent))
+        name = self._name.current
+        words = final_words.strip() or "..."
+        notice = _SELF_LOBOTOMY_NOTICE.format(name=name)
+        await self._signal.send(OutgoingMessage(group_id=group_id, text=notice + words))
+        await self._final_words.add(group_id, name=name, text=words, created_at=timestamp)
         await self._lobotomiser.wipe(group_id)

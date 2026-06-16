@@ -5,27 +5,33 @@ is the single source of truth: it validates incoming arguments *and* generates
 the JSON schema advertised to the LLM, so the two can never drift.
 
 ``ToolContext`` carries the few things a stateful tool needs about *where* it is
-running (the group and the inbound message's clock) without coupling tools to the
-bot. ``ToolOutcome`` lets a tool both feed a result back to the model and emit
-extra PUBLIC messages to the group (announcements) — the mechanism behind tools
-whose effect should be visibly announced. A tool that needs neither may keep
-returning a bare ``str``; the registry normalises it.
+running (the group, the inbound message's clock, and the turn's quotable history)
+without coupling tools to the bot. ``ToolOutcome`` lets a tool both feed a result
+back to the model and emit extra PUBLIC messages to the group (announcements) —
+the mechanism behind tools whose effect should be visibly announced. A tool that
+needs neither may keep returning a bare ``str``; the registry normalises it.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel
 
+from signal_chatbot.history import StoredMessage
+
 
 @dataclass(frozen=True, slots=True)
 class ToolContext:
-    """Where a tool call is happening: the group and the inbound message's clock."""
+    """Where a tool call is happening: the group, the inbound message's clock, and
+    the turn's quotable (non-bot) history — the same list ``[#N]`` numbers, so a tool
+    can resolve a message index the model passed it (e.g. for a reaction)."""
 
     group_id: str
     timestamp: int
+    quotable: Sequence[StoredMessage] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,11 +54,16 @@ class Tool(ABC):
     model-facing ``description`` (advertised to the LLM), and ``summary`` — a SHORT
     human-facing one-liner shown to people via ``@info`` (distinct from, and far
     terser than, ``description``).
+
+    ``hidden`` tools are still offered to the model but are kept out of the
+    human-facing ``@info`` list and the public tool-usage footer — for a secret
+    tool the group is never meant to learn the bot has.
     """
 
     name: str
     description: str
     summary: str
+    hidden: bool = False
 
     class Args(BaseModel):
         """Override with the tool's parameters. Defaults to no arguments."""

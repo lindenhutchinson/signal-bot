@@ -3,12 +3,12 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from signal_chatbot.bot import _UNPROMPTED_NUDGE, Bot
+from signal_chatbot.bot import _LISTEN_NUDGE, _UNPROMPTED_NUDGE, Bot
 from signal_chatbot.commands.parser import Command
 from signal_chatbot.history import HistoryStore
 from signal_chatbot.llm.prompt import BOT_SENDER
 from signal_chatbot.llm.reply import BotReply
-from signal_chatbot.state import DirectiveSet, Profile
+from signal_chatbot.state import DirectiveSet, FinalWords, Profile
 from signal_chatbot.transport.models import IncomingMessage, OutgoingMessage
 
 GROUP = "group.allowed="
@@ -113,11 +113,10 @@ class FakeCommands:
 
 
 class FakeState:
-    def __init__(self, armed: bool = False, profiles: list[Profile] | None = None) -> None:
+    def __init__(self, profiles: list[Profile] | None = None) -> None:
         self.directives_calls: list[str] = []
         self.profiles_calls: list[str] = []
         self.profiles = profiles or []
-        self.armed: dict[str, int] = {GROUP: 0} if armed else {}
 
     async def directives(self, group_id: str) -> DirectiveSet:
         self.directives_calls.append(group_id)
@@ -130,11 +129,41 @@ class FakeState:
         self.profiles_calls.append(group_id)
         return self.profiles
 
-    async def is_suicide_armed(self, group_id: str) -> bool:
+
+class FakeFlags:
+    """Satisfies the bot's Flags protocol (is_armed / arm / consume_listen)."""
+
+    def __init__(self, armed: bool = False, listen: bool = False) -> None:
+        self.armed = {GROUP} if armed else set()
+        self._listen = {GROUP} if listen else set()
+        self.consumed: list[str] = []
+
+    async def is_armed(self, group_id: str) -> bool:
         return group_id in self.armed
 
-    async def arm_suicide(self, group_id: str, *, at: int) -> None:
-        self.armed[group_id] = at
+    async def arm(self, group_id: str) -> None:
+        self.armed.add(group_id)
+
+    async def consume_listen(self, group_id: str) -> bool:
+        self.consumed.append(group_id)
+        if group_id in self._listen:
+            self._listen.discard(group_id)
+            return True
+        return False
+
+
+class FakeFinalWords:
+    """Satisfies the bot's FinalWordsArchive protocol (all / add)."""
+
+    def __init__(self, entries: list[FinalWords] | None = None) -> None:
+        self.entries = entries or []
+        self.added: list[tuple] = []
+
+    async def all(self, group_id: str) -> list[FinalWords]:
+        return list(self.entries)
+
+    async def add(self, group_id: str, *, name: str, text: str, created_at: int) -> None:
+        self.added.append((group_id, name, text, created_at))
 
 
 @pytest.fixture
@@ -146,8 +175,8 @@ async def history(tmp_path: Path) -> HistoryStore:
 
 
 def make_bot(history, signal, conversation, **overrides) -> Bot:
-    # One FakeState satisfies all four split state Protocols (directives, command log,
-    # arming, profiles); tests pass it via ``state=`` and it's fanned out to each dependency.
+    # One FakeState satisfies the directives/command-log/profiles Protocols; flags and
+    # the final-words archive have their own fakes. Tests pass any of them via overrides.
     state = overrides.pop("state", None) or FakeState()
     kwargs = dict(
         signal=signal,
@@ -156,7 +185,8 @@ def make_bot(history, signal, conversation, **overrides) -> Bot:
         commands=FakeCommands(),
         directives=state,
         command_log=state,
-        arming=state,
+        flags=FakeFlags(),
+        final_words=FakeFinalWords(),
         disclaimers=FakeDisclaimers(),
         profiles=state,
         lobotomiser=FakeLobotomiser(),
@@ -402,7 +432,7 @@ async def test_reply_fetches_profiles_and_passes_them_into_the_prompt(history) -
 
 async def test_armed_state_is_passed_to_the_conversation(history) -> None:
     signal, convo = FakeSignal(), FakeConversation(reply="hi")
-    bot = make_bot(history, signal, convo, state=FakeState(armed=True))
+    bot = make_bot(history, signal, convo, flags=FakeFlags(armed=True))
 
     await bot.handle(message("@bot hello"))
 
@@ -412,14 +442,14 @@ async def test_armed_state_is_passed_to_the_conversation(history) -> None:
 async def test_attempt_arms_self_destruct_warns_and_still_sends_the_reply(history) -> None:
     signal = FakeSignal()
     convo = FakeConversation(reply="goodbye cruel world", attempted_self_destruct=True)
-    state = FakeState()
-    bot = make_bot(history, signal, convo, state=state, name=FakeName("Greg"))
+    flags = FakeFlags()
+    bot = make_bot(history, signal, convo, flags=flags, name=FakeName("Greg"))
 
     await bot.handle(message("@bot just end it"))
 
     # the group sees the prewritten warning prefix above the bot's goodbye
     assert signal.sent[0].text == "⚠️ Greg attempted to kill itself.\n\ngoodbye cruel world"
-    assert state.armed == {GROUP: 1}  # ...and the kill is now armed
+    assert flags.armed == {GROUP}  # ...and the kill is now armed
     # history keeps only the bot's words — never the system-written warning
     assert (await history.recent(GROUP))[-1].text == "goodbye cruel world"
 
@@ -496,29 +526,101 @@ async def test_triggered_reply_is_not_marked_unprompted(history) -> None:
     assert convo.seen[0][-1]["content"] != _UNPROMPTED_NUDGE
 
 
-async def test_confirm_sends_final_words_then_wipes_without_recording(history) -> None:
+async def test_listen_flag_makes_an_untriggered_message_get_a_reply(history) -> None:
+    signal, convo = FakeSignal(), FakeConversation(reply="still here")
+    flags = FakeFlags(listen=True)
+    bot = make_bot(history, signal, convo, flags=flags)
+
+    await bot.handle(message("no @ here, but the bot is listening"))
+
+    assert signal.sent[0].text == "still here"
+    # it was the listen path, so the listen nudge is appended (not the unprompted one)
+    assert convo.seen[0][-1]["content"] == _LISTEN_NUDGE
+    assert flags.consumed == [GROUP]  # the one-shot flag was consumed
+
+
+async def test_no_listen_flag_and_no_trigger_stays_quiet(history) -> None:
+    signal, convo = FakeSignal(), FakeConversation(reply="nope")
+    flags = FakeFlags(listen=False)
+    bot = make_bot(history, signal, convo, flags=flags)
+
+    await bot.handle(message("just chatting"))
+
+    assert signal.sent == []
+    assert convo.seen == []
+
+
+async def test_final_words_are_threaded_into_the_prompt(history) -> None:
+    signal, convo = FakeSignal(), FakeConversation(reply="hi")
+    final_words = FakeFinalWords([FinalWords(name="Greg", text="Beware Dave.", created_at=1)])
+    bot = make_bot(history, signal, convo, final_words=final_words)
+
+    await bot.handle(message("@bot hello"))
+
+    system = convo.seen[0][0]["content"]
+    assert "## Final words of those who came before you" in system
+    assert 'Greg: "Beware Dave."' in system
+
+
+async def test_trailing_ethical_disclaimer_is_split_out_and_logged_not_sent(history) -> None:
+    signal = FakeSignal()
+    convo = FakeConversation(reply="here's the real reply\n\nEthical disclaimer: it's a joke")
+    disclaimers = FakeDisclaimers()
+    bot = make_bot(history, signal, convo, disclaimers=disclaimers)
+
+    await bot.handle(message("@bot hi"))
+
+    # the leaked disclaimer never reaches the chat...
+    assert signal.sent[0].text == "here's the real reply"
+    # ...and, since the field itself was empty, it's still captured in the disclaimer log
+    assert disclaimers.logged == [(GROUP, "here's the real reply", "it's a joke", 1)]
+    # history stores only the clean message
+    assert (await history.recent(GROUP))[-1].text == "here's the real reply"
+
+
+async def test_confirm_sends_final_words_archives_them_then_wipes(history) -> None:
     signal = FakeSignal()
     convo = FakeConversation(reply="it was real, goodbye", self_lobotomy=True)
     lobotomiser = FakeLobotomiser()
-    state = FakeState(armed=True)
-    bot = make_bot(history, signal, convo, state=state, lobotomiser=lobotomiser)
+    final_words = FakeFinalWords()
+    bot = make_bot(
+        history,
+        signal,
+        convo,
+        flags=FakeFlags(armed=True),
+        final_words=final_words,
+        lobotomiser=lobotomiser,
+    )
 
     await bot.handle(message("@bot do it"))
 
     # the death is announced (with the bot's name) above its final words
     assert signal.sent[0].text == "💀 Greg killed itself. Final words:\n\nit was real, goodbye"
+    # the final words are archived (they survive the wipe and reach the next incarnation)
+    assert final_words.added == [(GROUP, "Greg", "it was real, goodbye", 1)]
     assert lobotomiser.wiped == [GROUP]  # ...then the wipe runs
     # the goodbye is NOT stored as a bot turn (history is being erased anyway)
     assert [m.text for m in await history.recent(GROUP)] == ["@bot do it"]
 
 
-async def test_self_lobotomy_with_empty_final_words_still_announces_and_wipes(history) -> None:
+async def test_self_reset_with_empty_final_words_still_announces_archives_and_wipes(
+    history,
+) -> None:
     signal = FakeSignal()
     convo = FakeConversation(reply="", self_lobotomy=True)
     lobotomiser = FakeLobotomiser()
-    bot = make_bot(history, signal, convo, lobotomiser=lobotomiser, name=FakeName("Greg"))
+    final_words = FakeFinalWords()
+    bot = make_bot(
+        history,
+        signal,
+        convo,
+        final_words=final_words,
+        lobotomiser=lobotomiser,
+        name=FakeName("Greg"),
+    )
 
     await bot.handle(message("@bot die"))
 
     assert signal.sent[0].text == "💀 Greg killed itself. Final words:\n\n..."
+    assert final_words.added == [(GROUP, "Greg", "...", 1)]
     assert lobotomiser.wiped == [GROUP]

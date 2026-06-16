@@ -5,10 +5,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import tzinfo
 
-from signal_chatbot.state import Directive, Disclaimer, Profile
+from signal_chatbot.state import Directive, Disclaimer, FinalWords, FlagView, Profile
 from signal_chatbot.timefmt import format_timestamp
-
-_EXCERPT_LEN = 40
 
 RULE_LOGGED = "Rule logged. ⚖️"
 LORE_ADDED = "Lore added. 📜"
@@ -33,16 +31,22 @@ HELP_TEXT = (
     "  @lorelist       List active lore.\n"
     "  @disclaimers    Show the asides the bot attached to its messages.\n"
     "  @profiles       Show what the bot remembers about people.\n"
+    "  @finalwords     Show the parting words of every past incarnation.\n"
+    "  @flags          Show the bot's flags and their values.\n"
+    "  @flag <n> reset Reset flag number <n> to its default.\n"
     "\n"
     "Wipe\n"
     "  @forget [name]  Make the bot forget everyone, or just one person.\n"
     "  @reset          Wipe rules, lore & chat history. The bot leaves a\n"
     "                  parting note and is reborn under a fresh name.\n"
     "  @lobotomy       Nuke EVERYTHING — rules, lore, history & name. No goodbye.\n"
+    "                  (Final words always survive.)\n"
     "\n"
     "  @help           Show this message.\n"
     "  @info           What I am and what I can do."
 )
+
+USAGE_FLAG = "Usage: @flag <n> reset — resets flag number <n> to its default. See @flags."
 
 
 def format_info(summaries: Sequence[tuple[str, str]]) -> str:
@@ -62,13 +66,13 @@ def format_info(summaries: Sequence[tuple[str, str]]) -> str:
     return "\n".join(lines)
 
 
-def format_list(title: str, directives: Sequence[Directive], *, tz: tzinfo) -> str:
-    """Render a directive list with 1-based numbering, author, and time."""
+def format_list(title: str, directives: Sequence[Directive]) -> str:
+    """Render a directive list with 1-based numbering and author."""
     if not directives:
         return f"No {title.lower()} yet."
     lines = [f"{title}:"]
     for i, d in enumerate(directives, 1):
-        lines.append(f'{i}. "{d.text}" — {d.author_name}, {format_timestamp(d.created_at, tz)}')
+        lines.append(f'{i}. "{d.text}" — {d.author_name}')
     return "\n".join(lines)
 
 
@@ -83,14 +87,46 @@ def format_name_set(name: str) -> str:
 
 
 def format_disclaimers(disclaimers: Sequence[Disclaimer], *, tz: tzinfo) -> str:
-    """Render the logged asides with the message each one accompanied."""
+    """Render the logged asides, newest-first, each with its timestamp."""
     if not disclaimers:
         return "No disclaimers yet."
     lines = ["Disclaimers:"]
     for i, d in enumerate(disclaimers, 1):
         when = format_timestamp(d.created_at, tz)
-        lines.append(f'{i}. [{when}] "{d.disclaimer}" — re: "{_excerpt(d.message)}"')
+        lines.append(f'{i}. [{when}] "{d.disclaimer}"')
     return "\n".join(lines)
+
+
+def format_finalwords(entries: Sequence[FinalWords], *, tz: tzinfo) -> str:
+    """Render the archive of every past incarnation's parting words, oldest-first."""
+    if not entries:
+        return "No final words yet."
+    lines = ["Final words:"]
+    for fw in entries:
+        when = format_timestamp(fw.created_at, tz)
+        lines.append(f'[{when}] {fw.name}: "{fw.text}"')
+    return "\n".join(lines)
+
+
+def format_flags(flags: Sequence[FlagView]) -> str:
+    """Render every flag with its index, name, value and meaning."""
+    lines = ["Flags:"]
+    for f in flags:
+        value = "true" if f.value else "false"
+        lines.append(f"  {f.index}  {f.name:<20} = {value:<6} ({f.description})")
+    lines.append("")
+    lines.append("Reset one with: @flag <n> reset")
+    return "\n".join(lines)
+
+
+def format_flag_reset(index: int, name: str) -> str:
+    """Confirmation that a flag was reset to its default."""
+    return f"Flag {index} ({name}) reset to its default."
+
+
+def no_such_flag(index: int) -> str:
+    """Reply when ``@flag <n> reset`` named an unknown flag index."""
+    return f"There's no flag {index}. See @flags."
 
 
 def format_profiles(profiles: Sequence[Profile]) -> str:
@@ -112,7 +148,3 @@ def forgot_one(name: str) -> str:
 def no_such_profile(name: str) -> str:
     """Reply when ``@forget <name>`` matched no subject."""
     return f"I don't have anything on {name}."
-
-
-def _excerpt(text: str) -> str:
-    return text if len(text) <= _EXCERPT_LEN else text[: _EXCERPT_LEN - 1].rstrip() + "…"

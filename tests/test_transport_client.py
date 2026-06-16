@@ -66,6 +66,33 @@ async def test_send_omits_quote_fields_when_only_some_are_present() -> None:
     assert "quote_message" not in body
 
 
+async def test_send_reaction_posts_to_the_reactions_endpoint() -> None:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["url"] = str(request.url)
+        seen["json"] = json.loads(request.content)
+        return httpx.Response(200)
+
+    http = httpx.AsyncClient(base_url="http://bridge", transport=httpx.MockTransport(handler))
+    client = SignalClient("http://bridge", "+61400000000", http=http)
+
+    await client.send_reaction(
+        "group.x=", emoji="🔥", target_author="+61400000001", target_timestamp=1781274720000
+    )
+    await http.aclose()
+
+    assert seen["method"] == "POST"
+    assert seen["url"] == "http://bridge/v1/reactions/+61400000000"
+    assert seen["json"] == {
+        "recipient": "group.x=",
+        "reaction": "🔥",
+        "target_author": "+61400000001",
+        "timestamp": 1781274720000,
+    }
+
+
 async def test_set_profile_name_puts_to_the_profiles_endpoint() -> None:
     seen: dict[str, object] = {}
 

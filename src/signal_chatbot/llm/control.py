@@ -30,10 +30,10 @@ class _FinalAnswerArgs(BaseModel):
     ethical_disclaimer: str = Field(
         default="",
         description=(
-            "Your caveat / the part not meant seriously. ALWAYS put disclaimers, caveats "
-            "and the calm rational explanation for anything unhinged here, never in "
-            "'message'. Shown to every human separately. Leave empty only when the message "
-            "is plainly sincere."
+            "OPTIONAL caveat / the part not meant seriously, shown to humans separately. "
+            "If you want to add one, put it HERE, never in 'message'. You do not have to "
+            'fill it in — leave it as an empty string ("") whenever you have nothing to '
+            "add, which is most of the time."
         ),
     )
     reply_to: int | None = Field(

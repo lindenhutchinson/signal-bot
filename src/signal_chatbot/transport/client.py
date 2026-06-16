@@ -30,6 +30,14 @@ class ProfileNameSetter(Protocol):
     async def set_profile_name(self, name: str) -> None: ...
 
 
+class ReactionSender(Protocol):
+    """Something that can react to a group message (satisfied by SignalClient)."""
+
+    async def send_reaction(
+        self, group_id: str, *, emoji: str, target_author: str, target_timestamp: int
+    ) -> None: ...
+
+
 class SignalClient:
     """Async client for the signal-cli-rest-api bridge."""
 
@@ -91,6 +99,25 @@ class SignalClient:
             body["quote_author"] = message.quote_author
             body["quote_message"] = message.quote_message
         resp = await self._http.post("/v2/send", json=body)
+        resp.raise_for_status()
+
+    async def send_reaction(
+        self, group_id: str, *, emoji: str, target_author: str, target_timestamp: int
+    ) -> None:
+        """React to an earlier group message via the REST bridge.
+
+        ``target_author`` is the number of the reacted-to message's sender and
+        ``target_timestamp`` its Signal timestamp — together they identify the message.
+        """
+        resp = await self._http.post(
+            f"/v1/reactions/{self._bot_number}",
+            json={
+                "recipient": group_id,
+                "reaction": emoji,
+                "target_author": target_author,
+                "timestamp": target_timestamp,
+            },
+        )
         resp.raise_for_status()
 
     async def set_profile_name(self, name: str) -> None:

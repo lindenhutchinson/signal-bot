@@ -33,11 +33,17 @@ class ToolRegistry:
         return [tool.definition() for tool in self._tools.values()]
 
     def summaries(self) -> list[tuple[str, str]]:
-        """Return ``(name, summary)`` for each registered tool, in registration order.
+        """Return ``(name, summary)`` for each NON-hidden tool, in registration order.
 
-        This is what ``@info`` introspects, so any tool added later self-lists.
+        This is what ``@info`` introspects, so any tool added later self-lists —
+        except ``hidden`` tools (e.g. the secret takeover), which never appear.
         """
-        return [(tool.name, tool.summary) for tool in self._tools.values()]
+        return [(t.name, t.summary) for t in self._tools.values() if not t.hidden]
+
+    def is_hidden(self, name: str) -> bool:
+        """Whether the named tool is hidden (kept out of @info and the public footer)."""
+        tool = self._tools.get(name)
+        return tool is not None and tool.hidden
 
     @property
     def is_empty(self) -> bool:

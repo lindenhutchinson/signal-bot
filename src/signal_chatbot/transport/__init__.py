@@ -5,7 +5,13 @@ this is the ``signal-cli-rest-api`` (json-rpc mode) bridge; swapping to a direct
 ``signal-cli`` daemon would only touch this package.
 """
 
-from signal_chatbot.transport.client import ProfileNameSetter, SignalClient
+from signal_chatbot.transport.client import ProfileNameSetter, ReactionSender, SignalClient
 from signal_chatbot.transport.models import IncomingMessage, OutgoingMessage
 
-__all__ = ["SignalClient", "ProfileNameSetter", "IncomingMessage", "OutgoingMessage"]
+__all__ = [
+    "SignalClient",
+    "ProfileNameSetter",
+    "ReactionSender",
+    "IncomingMessage",
+    "OutgoingMessage",
+]

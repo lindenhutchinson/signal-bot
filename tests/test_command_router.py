@@ -10,6 +10,7 @@ from signal_chatbot.commands.router import CommandRouter
 from signal_chatbot.history import HistoryStore
 from signal_chatbot.lobotomy import Lobotomiser
 from signal_chatbot.state import Database
+from signal_chatbot.state.flags import FlagRegistry
 from signal_chatbot.tools import ToolRegistry
 from signal_chatbot.tools.builtin.clock import CurrentTime
 from signal_chatbot.transport.models import IncomingMessage
@@ -59,9 +60,10 @@ def router(
     db, history, *, farewell=None, name_setter=None, default_name="bot", tools=None
 ) -> CommandRouter:
     setter = name_setter or FakeNameSetter()
+    flags = FlagRegistry(db.flags)
     lobotomiser = Lobotomiser(
         directives=db.directives,
-        arming=db.arming,
+        flags=flags,
         disclaimers=db.disclaimers,
         profiles=db.profiles,
         history=history,
@@ -73,6 +75,8 @@ def router(
         commands=db.commands,
         disclaimers=db.disclaimers,
         profiles=db.profiles,
+        flags=flags,
+        final_words=db.final_words,
         history=history,
         farewell=farewell or FakeFarewellWriter(None),
         name_setter=setter,
@@ -124,7 +128,7 @@ async def test_rulelist_renders_entries(stores) -> None:
 
     out = await _run(r, "@rulelist")
 
-    assert out.startswith('Rules:\n1. "no puns" — Alice,')
+    assert out == 'Rules:\n1. "no puns" — Alice'
 
 
 async def test_disclaimers_lists_logged_asides(stores) -> None:
@@ -136,7 +140,7 @@ async def test_disclaimers_lists_logged_asides(stores) -> None:
 
     out = await _run(r, "@disclaimers")
 
-    assert out.startswith('Disclaimers:\n1. [2026-06-13 00:32 AEST] "jk" — re: "doomed"')
+    assert out == 'Disclaimers:\n1. [2026-06-13 00:32 AEST] "jk"'
 
 
 async def test_disclaimers_empty(stores) -> None:
@@ -223,7 +227,7 @@ async def test_info_lists_injected_tools_and_is_not_logged(stores) -> None:
     assert await db.commands.recent_commands(GROUP) == []
 
 
-async def test_reset_with_farewell_wipes_seeds_lore_and_announces(stores) -> None:
+async def test_reset_with_farewell_wipes_records_final_words_and_announces(stores) -> None:
     db, history = stores
     await db.directives.add_directive(
         GROUP, kind="rule", author_name="A", author_number="+1", text="old rule", created_at=1
@@ -237,8 +241,10 @@ async def test_reset_with_farewell_wipes_seeds_lore_and_announces(stores) -> Non
     assert out == "Final message from Greg:\nBeware Dave."
     directives = await db.directives.directives(GROUP)
     assert directives.rules == []
-    assert [(d.text, d.author_name, d.author_number) for d in directives.lore] == [
-        ("Beware Dave.", "Greg", "bot")
+    assert directives.lore == []  # the farewell is NOT seeded back as lore
+    # ...it goes to the never-wiped final-words archive instead
+    assert [(fw.name, fw.text) for fw in await db.final_words.all(GROUP)] == [
+        ("Greg", "Beware Dave.")
     ]
     assert [c.command for c in await db.commands.recent_commands(GROUP)] == ["@reset"]
     assert name_setter.names == ["Greg"]  # reset renames the bot to its new self
@@ -256,8 +262,8 @@ async def test_reset_rename_failure_does_not_abort_the_reset(stores) -> None:
     out = await _run(r, "@reset")
 
     assert out == "Final message from Greg:\nBeware Dave."  # farewell still completes
-    directives = await db.directives.directives(GROUP)
-    assert [d.text for d in directives.lore] == ["Beware Dave."]  # lore still seeded
+    # the final words are still recorded despite the rename failing
+    assert [fw.text for fw in await db.final_words.all(GROUP)] == ["Beware Dave."]
 
 
 async def test_name_sets_display_name_logs_and_confirms(stores) -> None:
@@ -298,12 +304,13 @@ async def test_reset_wipes_history_after_the_farewell_reads_it(stores) -> None:
 
 async def test_reset_disarms_pending_self_destruct(stores) -> None:
     db, history = stores
-    await db.arming.arm_suicide(GROUP, at=1)
+    flags = FlagRegistry(db.flags)
+    await flags.arm(GROUP)
     r = router(db, history, farewell=FakeFarewellWriter(None))
 
     await _run(r, "@reset")
 
-    assert await db.arming.is_suicide_armed(GROUP) is False
+    assert await flags.is_armed(GROUP) is False
 
 
 async def test_reset_clears_disclaimers_and_profiles(stores) -> None:
@@ -320,12 +327,13 @@ async def test_reset_clears_disclaimers_and_profiles(stores) -> None:
 
 async def test_lobotomy_disarms_pending_self_destruct(stores) -> None:
     db, history = stores
-    await db.arming.arm_suicide(GROUP, at=1)
+    flags = FlagRegistry(db.flags)
+    await flags.arm(GROUP)
     r = router(db, history)
 
     await _run(r, "@lobotomy")
 
-    assert await db.arming.is_suicide_armed(GROUP) is False
+    assert await flags.is_armed(GROUP) is False
 
 
 async def test_lobotomy_clears_disclaimers_and_profiles(stores) -> None:
@@ -372,3 +380,74 @@ async def test_reset_without_usable_farewell_wipes_cleanly(stores) -> None:
     assert await _run(r, "@reset") == replies.RESET_CLEAN
     directives = await db.directives.directives(GROUP)
     assert directives.rules == [] and directives.lore == []
+
+
+async def test_lobotomy_preserves_the_final_words_archive(stores) -> None:
+    db, history = stores
+    await db.final_words.add(GROUP, name="Greg", text="Beware Dave.", created_at=1)
+    r = router(db, history)
+
+    await _run(r, "@lobotomy")
+
+    # everything else is gone, but the lineage of final words survives the nuke
+    assert [fw.text for fw in await db.final_words.all(GROUP)] == ["Beware Dave."]
+
+
+async def test_finalwords_lists_the_archive(stores) -> None:
+    db, history = stores
+    await db.final_words.add(GROUP, name="Greg", text="Beware Dave.", created_at=1781274720000)
+    r = router(db, history)
+
+    out = await _run(r, "@finalwords")
+
+    assert out.startswith("Final words:")
+    assert 'Greg: "Beware Dave."' in out
+    # a query, so nothing is logged
+    assert await db.commands.recent_commands(GROUP) == []
+
+
+async def test_finalwords_empty(stores) -> None:
+    db, history = stores
+    r = router(db, history)
+
+    assert await _run(r, "@finalwords") == "No final words yet."
+
+
+async def test_flags_lists_every_flag(stores) -> None:
+    db, history = stores
+    r = router(db, history)
+
+    out = await _run(r, "@flags")
+
+    assert out.startswith("Flags:")
+    assert "listen_next" in out and "self_destruct_armed" in out
+    assert await db.commands.recent_commands(GROUP) == []  # a query, not logged
+
+
+async def test_flag_reset_restores_default_and_logs(stores) -> None:
+    db, history = stores
+    flags = FlagRegistry(db.flags)
+    await flags.arm(GROUP)
+    r = router(db, history)
+
+    out = await _run(r, "@flag 1 reset")
+
+    assert out == replies.format_flag_reset(1, "self_destruct_armed")
+    assert await flags.is_armed(GROUP) is False
+    assert [c.command for c in await db.commands.recent_commands(GROUP)] == ["@flag"]
+
+
+async def test_flag_unknown_index_reports_no_such_flag_and_does_not_log(stores) -> None:
+    db, history = stores
+    r = router(db, history)
+
+    assert await _run(r, "@flag 99 reset") == replies.no_such_flag(99)
+    assert await db.commands.recent_commands(GROUP) == []
+
+
+async def test_flag_bad_usage_returns_usage(stores) -> None:
+    db, history = stores
+    r = router(db, history)
+
+    assert await _run(r, "@flag 0") == replies.USAGE_FLAG
+    assert await _run(r, "@flag nope reset") == replies.USAGE_FLAG

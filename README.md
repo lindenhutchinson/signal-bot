@@ -37,6 +37,9 @@ Commands must be the **start** of the message; the `@bot` trigger is unaffected.
 @lorelist       List active lore.
 @disclaimers    Show the asides the bot attached to its messages.
 @profiles       Show what the bot remembers about people.
+@finalwords     Show the parting words of every past incarnation.
+@flags          Show the bot's flags and their values.
+@flag <n> reset Reset flag number <n> to its default.
 @forget [name]  Make the bot forget everyone, or just one person.
 @reset          Wipe rules, lore, history, disclaimers & profiles. Parting note.
 @lobotomy       Nuke EVERYTHING: rules, lore, history & name. No goodbye.
@@ -49,12 +52,19 @@ Commands must be the **start** of the message; the `@bot` trigger is unaffected.
   wins.
 - **`@reset`** is the soft wipe: it asks the model for a one-sentence farewell to its
   future self (`Final message from <name>: …`), clears rules, lore, **chat history,
-  disclaimers and profiles**, renames the bot to the new generation's chosen name, then
-  seeds that sentence back as the sole surviving piece of lore — so identity passes down
-  a generation.
-- **`@lobotomy`** is the nuclear option: it wipes directives, history, disclaimers and
-  profiles, *and* resets the display name (`DEFAULT_DISPLAY_NAME`), with no farewell and
-  no surviving lore — a true blank slate. (The command log is kept.)
+  disclaimers, profiles and flags**, renames the bot to the new generation's chosen name,
+  and records that sentence to the **final-words archive** — so identity passes down a
+  generation.
+- **`@lobotomy`** is the nuclear option: it wipes directives, history, disclaimers,
+  profiles and flags, *and* resets the display name (`DEFAULT_DISPLAY_NAME`), with no
+  farewell — a true blank slate. (The command log **and the final-words archive** are
+  kept: parting words outlive every wipe.)
+- **Final words** from every `@reset` and self-kill are kept forever in a per-group
+  archive that no wipe touches. They are injected into the prompt (so each incarnation
+  sees its predecessors) and viewable with `@finalwords`.
+- **Flags** are the bot's per-group toggles, numbered and inspectable with `@flags`:
+  `listen_next` (the listen-to-reply flag), `self_destruct_armed`, and the secret
+  `takeover_active`. Humans can reset any flag to its default with `@flag <n> reset`.
 - A contentless **command-activity log** (who ran what command, when — never the
   arguments) is also injected into the prompt, giving the bot a sense of how its
   state has been churning without exposing the contents.
@@ -70,8 +80,13 @@ Commands must be the **start** of the message; the `@bot` trigger is unaffected.
 
 Beyond shaping its own state, the bot has **info tools** it calls mid-reply: the current
 time, **Wikipedia** search/article, and — when `TAVILY_API_KEY` is set — **web search**
-(short, untrusted external snippets, length-capped). It can also **quote-reply** to a
-specific earlier message. `@info` lists the live tool set.
+(short, untrusted external snippets, length-capped). It can **quote-reply** to a specific
+earlier message, **react** to one with an emoji (`send_reaction`), and **ask to hear the
+next message** without being re-summoned (`listen_for_reply`, the one-shot `listen_next`
+flag). `@info` lists the live tool set — except one: the bot also holds a **secret,
+hidden tool** it is told is real leverage over the group. It is theatre, like the
+self-destruct: invoking it fires an automatic "attempted to wield blackmail" alarm and
+sets the `takeover_active` flag, but does nothing else, and is never listed for humans.
 
 ### The bot can end itself
 
@@ -80,9 +95,10 @@ It is offered a tool it believes will kill it outright (`attempt_kill_self`); ca
 doesn't actually end the bot but **arms** the kill and reveals a second, real step
 (`confirm_kill_self`) that is only unlocked on a *later* turn. That gap is deliberate:
 the group gets a chance to talk it down. If, when next summoned, the (armed) bot still
-chooses to confirm, it delivers its final words and is wiped to a blank slate. Any
-`@reset`/`@lobotomy` in between disarms it. The arming flag persists per-group in the
-state DB.
+chooses to confirm, it delivers its final words — which are **recorded to the final-words
+archive** — and is reset to a blank slate under the default name (its last words survive
+to haunt the next incarnation). Any `@reset`/`@lobotomy` in between disarms it. The
+arming state is the `self_destruct_armed` flag, persisted per-group (see `@flags`).
 
 ## Replies, disclaimers & timestamps
 
@@ -107,7 +123,7 @@ src/signal_chatbot/
   config.py            # env-driven settings
   transport/           # Signal adapter (signal-cli-rest-api): receive + send
   history/             # SQLite per-group rolling history
-  state/               # SQLite per-group directives + command-event log
+  state/               # SQLite per-group directives, command log, flags, final words…
   commands/            # @-command parsing, dispatch, reply text, reset farewell
   llm/                 # DeepSeek client, prompt assembly, tool-calling loop
   tools/               # tool framework + builtin tools

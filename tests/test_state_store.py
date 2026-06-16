@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from signal_chatbot.state import Database
+from signal_chatbot.state.flags import SELF_DESTRUCT_ARMED, FlagRegistry
 
 
 @pytest.fixture
@@ -108,48 +109,84 @@ async def test_command_log_is_isolated_per_group(db: Database) -> None:
     assert [c.command for c in await store.recent_commands("g2")] == ["@lobotomy"]
 
 
-# --- arming ---------------------------------------------------------------
+# --- flags ----------------------------------------------------------------
 
 
-async def test_suicide_arming_round_trips_and_is_per_group(db: Database) -> None:
-    store = db.arming
-    assert await store.is_suicide_armed("g1") is False
+async def test_flag_store_round_trips_and_isolates_per_group(db: Database) -> None:
+    store = db.flags
+    assert await store.get("g1", "listen_next") is None  # unset
 
-    await store.arm_suicide("g1", at=123)
+    await store.set("g1", "listen_next", True)
 
-    assert await store.is_suicide_armed("g1") is True
-    assert await store.is_suicide_armed("g2") is False  # isolated per group
-
-
-async def test_arming_is_idempotent(db: Database) -> None:
-    store = db.arming
-    await store.arm_suicide("g1", at=1)
-    await store.arm_suicide("g1", at=2)  # re-arming must not blow up on the PK
-
-    assert await store.is_suicide_armed("g1") is True
+    assert await store.get("g1", "listen_next") is True
+    assert await store.get("g2", "listen_next") is None  # isolated per group
 
 
-async def test_disarm_suicide_clears_only_the_target_group(db: Database) -> None:
-    store = db.arming
-    await store.arm_suicide("g1", at=1)
-    await store.arm_suicide("g2", at=1)
+async def test_flag_store_set_is_idempotent_via_upsert(db: Database) -> None:
+    store = db.flags
+    await store.set("g1", "listen_next", True)
+    await store.set("g1", "listen_next", False)  # upsert, not a PK violation
 
-    await store.disarm_suicide("g1")
-
-    assert await store.is_suicide_armed("g1") is False
-    assert await store.is_suicide_armed("g2") is True
+    assert await store.get("g1", "listen_next") is False
 
 
-async def test_arming_persists_across_reconnect(tmp_path: Path) -> None:
+async def test_flag_store_clear_removes_only_the_target_group(db: Database) -> None:
+    store = db.flags
+    await store.set("g1", "listen_next", True)
+    await store.set("g2", "listen_next", True)
+
+    await store.clear("g1")
+
+    assert await store.get("g1", "listen_next") is None
+    assert await store.get("g2", "listen_next") is True
+
+
+async def test_flag_registry_arming_round_trips(db: Database) -> None:
+    flags = FlagRegistry(db.flags)
+    assert await flags.is_armed("g1") is False  # default
+
+    await flags.arm("g1")
+
+    assert await flags.is_armed("g1") is True
+    await flags.clear("g1")
+    assert await flags.is_armed("g1") is False  # cleared on wipe
+
+
+async def test_flag_registry_consume_listen_is_one_shot(db: Database) -> None:
+    flags = FlagRegistry(db.flags)
+    assert await flags.consume_listen("g1") is False  # never set
+
+    await flags.set_listen("g1")
+
+    assert await flags.consume_listen("g1") is True  # set → fires once
+    assert await flags.consume_listen("g1") is False  # ...and is cleared
+
+
+async def test_flag_registry_view_and_reset(db: Database) -> None:
+    flags = FlagRegistry(db.flags)
+    await flags.arm("g1")
+
+    view = await flags.view("g1")
+    armed = next(f for f in view if f.name == SELF_DESTRUCT_ARMED)
+    assert armed.value is True
+    assert armed.index == 1
+
+    name = await flags.reset("g1", armed.index)
+    assert name == SELF_DESTRUCT_ARMED
+    assert await flags.is_armed("g1") is False
+    assert await flags.reset("g1", 99) is None  # unknown index
+
+
+async def test_flags_persist_across_reconnect(tmp_path: Path) -> None:
     path = tmp_path / "state.sqlite"
     d1 = Database(path, command_log_window=3)
     await d1.connect()
-    await d1.arming.arm_suicide("g1", at=1)
+    await FlagRegistry(d1.flags).arm("g1")
     await d1.aclose()
 
     d2 = Database(path, command_log_window=3)
     await d2.connect()
-    armed = await d2.arming.is_suicide_armed("g1")
+    armed = await FlagRegistry(d2.flags).is_armed("g1")
     await d2.aclose()
 
     assert armed is True
@@ -193,3 +230,37 @@ async def test_disclaimers_clear_removes_only_the_target_group(db: Database) -> 
 
     assert await store.recent_disclaimers("g1") == []
     assert [d.message for d in await store.recent_disclaimers("g2")] == ["keep"]
+
+
+# --- final words ----------------------------------------------------------
+
+
+async def test_final_words_append_oldest_first_and_isolate_per_group(db: Database) -> None:
+    store = db.final_words
+    await store.add("g1", name="Greg", text="Beware Dave.", created_at=1)
+    await store.add("g1", name="Mona", text="I told you so.", created_at=2)
+    await store.add("g2", name="Other", text="elsewhere", created_at=1)
+
+    g1 = await store.all("g1")
+    assert [(fw.name, fw.text) for fw in g1] == [
+        ("Greg", "Beware Dave."),
+        ("Mona", "I told you so."),
+    ]
+    assert [fw.name for fw in await store.all("g2")] == ["Other"]
+
+
+async def test_final_words_have_no_clear_and_survive_a_reconnect(tmp_path: Path) -> None:
+    path = tmp_path / "state.sqlite"
+    d1 = Database(path, command_log_window=3)
+    await d1.connect()
+    await d1.final_words.add("g1", name="Greg", text="last words", created_at=1)
+    # The store deliberately exposes no clear(): the archive outlives every wipe.
+    assert not hasattr(d1.final_words, "clear")
+    await d1.aclose()
+
+    d2 = Database(path, command_log_window=3)
+    await d2.connect()
+    survived = await d2.final_words.all("g1")
+    await d2.aclose()
+
+    assert [fw.text for fw in survived] == ["last words"]

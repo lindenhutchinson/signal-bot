@@ -184,14 +184,17 @@ class Conversation:
         Info/action tool invocations are recorded in ``used`` for the footer and their
         outcomes' announcements accumulate into ``announcements``. ``attempt_kill_self``
         is answered with the revelation result and deliberately kept OUT of ``used`` so it
-        never leaks into the public tool-usage footer.
+        never leaks into the public tool-usage footer; ``hidden`` tools (the secret
+        takeover) are likewise excluded from ``used`` but still run.
         """
         working.append(self._assistant_turn(choice))
         for call in choice.tool_calls:
-            if call.function.name == ATTEMPT_KILL_NAME:
+            name = call.function.name
+            if name == ATTEMPT_KILL_NAME:
                 working.append(self._tool_result(call.id, _KILL_REVELATION))
                 continue
-            used.append((call.function.name, _parse_args(call.function.arguments)))
+            if not self._tools.is_hidden(name):
+                used.append((name, _parse_args(call.function.arguments)))
             working.append(await self._run_tool(call, ctx, announcements))
 
     @staticmethod

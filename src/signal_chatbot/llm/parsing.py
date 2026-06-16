@@ -32,6 +32,28 @@ def _strip_code_fence(text: str) -> str:
 # it (and anything after) so what's left is the real answer, or empty if it was all markup.
 _TOOL_MARKUP_RE = re.compile(r"\s*<[^>]*DSML.*\Z", re.DOTALL)
 
+# The disclaimer belongs ONLY in the ethical_disclaimer field, never in the public
+# message — but the model still sometimes writes an "Ethical disclaimer:" section into the
+# message itself, as a leading label OR (more often) a trailing paragraph on its own line.
+# This marker matches that label at the start of any line, so we can split it back out.
+_DISCLAIMER_MARKER_RE = re.compile(
+    r"(?im)^[ \t>*_\-]*ethical[ \t_-]*disclaimer\b[ \t]*[:\-–—]?[ \t]*"
+)
+
+
+def split_off_disclaimer(text: str) -> tuple[str, str]:
+    """Split a leaked ``Ethical disclaimer:`` section out of a message.
+
+    Returns ``(message, disclaimer)``: everything before the first marker is the real
+    message; the marker and everything after it become the disclaimer. With no marker,
+    returns ``(text, "")``. This is a backstop — the model is told to use the
+    ethical_disclaimer field — that catches both a leading label and a trailing block.
+    """
+    match = _DISCLAIMER_MARKER_RE.search(text)
+    if match is None:
+        return text.strip(), ""
+    return text[: match.start()].strip(), text[match.end() :].strip()
+
 
 def _clean(value: Any) -> str:
     return "" if value is None else str(value).strip()
