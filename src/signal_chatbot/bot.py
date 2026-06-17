@@ -1,9 +1,11 @@
 """The orchestrator: wires transport, history, and the LLM into the bot loop.
 
 For every incoming group message it (1) enforces the allowlist, (2) records the
-message as context, and (3) if the trigger alias is present, generates and sends
-a reply. A per-group lock serialises overlapping triggers so replies for one
-group are produced in order.
+message as context, and (3) decides whether to engage: it replies when the trigger
+alias is present (or it asked to hear this message), and otherwise rolls a low chance
+to chime in unprompted — half of those turns a bare emoji reaction, half a full
+message. A per-group lock serialises overlapping turns so replies for one group are
+produced in order.
 """
 
 from __future__ import annotations
@@ -51,6 +53,19 @@ _UNPROMPTED_NUDGE = (
 _LISTEN_NUDGE = (
     "(System: you asked to hear the next message — here it is. Reply to it directly. If "
     "you want to keep listening after this, call listen_for_reply again.)"
+)
+
+# Appended on a react-only chime-in: the bot isn't speaking this turn, it's just reacting
+# (like tapping an emoji in the app). It must call send_reaction in its OWN step first —
+# NOT in the same turn as final_answer, or the reaction is dropped — then finish with an
+# empty final_answer so no words are sent.
+_REACT_NUDGE = (
+    "(System: nobody summoned you and you're NOT speaking this turn — you just feel like "
+    "reacting, the way anyone taps an emoji on a message. Pick the message that's worth a "
+    "reaction (use its [#N] number) and call send_reaction with a single fitting emoji. Do "
+    "that as your first and only tool call this step; once you see it succeed, call "
+    "final_answer with an EMPTY message. Send no words. If nothing's worth reacting to, "
+    "just call final_answer with an empty message and react to nothing.)"
 )
 
 
@@ -151,6 +166,7 @@ class Bot:
         error_reply: str,
         timezone: tzinfo,
         unprompted_reply_chance: float = 0.0,
+        unprompted_react_share: float = 0.5,
         rng: Callable[[], float] = random.random,
     ):
         self._signal = signal
@@ -172,6 +188,7 @@ class Bot:
         self._error_reply = error_reply
         self._timezone = timezone
         self._unprompted_chance = unprompted_reply_chance
+        self._react_share = unprompted_react_share
         self._rng = rng
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
@@ -224,13 +241,22 @@ class Bot:
                 await self._reply(message.group_id, message.timestamp, via_listen=listening)
             return
 
+        # Unprompted chime-in: a low-chance roll to engage at all, then a coin flip on
+        # whether this turn is a bare reaction or a full message.
         if self._should_pipe_up():
             async with self._locks[message.group_id]:
-                await self._reply(message.group_id, message.timestamp, unprompted=True)
+                if self._should_react():
+                    await self._reply(message.group_id, message.timestamp, react=True)
+                else:
+                    await self._reply(message.group_id, message.timestamp, unprompted=True)
 
     def _should_pipe_up(self) -> bool:
         """Roll the dice on chiming in unprompted (low chance, off when 0)."""
         return self._unprompted_chance > 0 and self._rng() < self._unprompted_chance
+
+    def _should_react(self) -> bool:
+        """Given the bot is chiming in, decide if this turn is a bare reaction (vs a message)."""
+        return self._rng() < self._react_share
 
     def _is_allowed(self, message: IncomingMessage) -> bool:
         if message.group_id not in self._allowed_groups:
@@ -238,7 +264,13 @@ class Bot:
         return not self._allowed_senders or message.sender_number in self._allowed_senders
 
     async def _reply(
-        self, group_id: str, timestamp: int, *, unprompted: bool = False, via_listen: bool = False
+        self,
+        group_id: str,
+        timestamp: int,
+        *,
+        unprompted: bool = False,
+        via_listen: bool = False,
+        react: bool = False,
     ) -> None:
         try:
             armed = await self._flags.is_armed(group_id)
@@ -256,7 +288,9 @@ class Bot:
                 profiles=profiles,
                 final_words=final_words,
             )
-            if unprompted:
+            if react:
+                messages.append({"role": "user", "content": _REACT_NUDGE})
+            elif unprompted:
                 messages.append({"role": "user", "content": _UNPROMPTED_NUDGE})
             elif via_listen:
                 messages.append({"role": "user", "content": _LISTEN_NUDGE})
@@ -278,31 +312,49 @@ class Bot:
         message, leaked = split_off_disclaimer(reply.message.strip())
         disclaimer = reply.ethical_disclaimer or leaked
         has_message = bool(message)
-        text = message or self._error_reply
+        # An empty message falls back to the error reply ONLY when a human actually summoned
+        # us. On the unprompted/listen/react paths nobody is waiting, so we stay silent
+        # rather than blurt the error string — a react turn has already fired its emoji as a
+        # side-effect during respond, and the words it deliberately withheld are the point.
+        prompted = not (unprompted or via_listen or react)
         if disclaimer:
             await self._disclaimers.add_disclaimer(
-                group_id, message=text, disclaimer=disclaimer, created_at=timestamp
+                group_id,
+                message=message or self._error_reply,
+                disclaimer=disclaimer,
+                created_at=timestamp,
             )
-        # The self-destruct warning and the tool-usage footer are shown to the group but
-        # kept OUT of history: storing them would let the model see them in its own past
-        # turns and learn to fake them. Both are suppressed on the error-reply fallback.
-        warning = self._self_destruct_warning() if reply.attempted_self_destruct else ""
-        sent = warning + text + reply.tool_footer if has_message else text
-        # Quoting applies only to the main reply: announcements and the
-        # self-lobotomy/error paths are sent unquoted.
-        quote = self._resolve_quote(history, reply.reply_to_index) if has_message else None
-        outgoing = OutgoingMessage(group_id=group_id, text=sent)
-        if quote is not None:
-            outgoing = replace(
-                outgoing,
-                quote_timestamp=quote.timestamp,
-                quote_author=quote.sender_number,
-                quote_message=quote.text,
+        if has_message:
+            # The self-destruct warning and the tool-usage footer are shown to the group but
+            # kept OUT of history: storing them would let the model see them in its own past
+            # turns and learn to fake them.
+            warning = self._self_destruct_warning() if reply.attempted_self_destruct else ""
+            sent = warning + message + reply.tool_footer
+            # Quoting applies only to the main reply.
+            quote = self._resolve_quote(history, reply.reply_to_index)
+            outgoing = OutgoingMessage(group_id=group_id, text=sent)
+            if quote is not None:
+                outgoing = replace(
+                    outgoing,
+                    quote_timestamp=quote.timestamp,
+                    quote_author=quote.sender_number,
+                    quote_message=quote.text,
+                )
+            await self._signal.send(outgoing)
+            await self._history.append(
+                group_id, sender=BOT_SENDER, text=message, timestamp=timestamp, sender_number=""
             )
-        await self._signal.send(outgoing)
-        await self._history.append(
-            group_id, sender=BOT_SENDER, text=text, timestamp=timestamp, sender_number=""
-        )
+        elif prompted:
+            # Summoned, but the model produced nothing — send the fallback so the human who
+            # @'d us isn't left hanging. The warning/footer are suppressed on this path.
+            await self._signal.send(OutgoingMessage(group_id=group_id, text=self._error_reply))
+            await self._history.append(
+                group_id,
+                sender=BOT_SENDER,
+                text=self._error_reply,
+                timestamp=timestamp,
+                sender_number="",
+            )
 
         # Tool-produced announcements are public, sent as their own messages AFTER the
         # main reply, and (like the footer) kept OUT of history so the model can't fake them.

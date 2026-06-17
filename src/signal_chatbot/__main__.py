@@ -146,6 +146,7 @@ async def _run() -> None:
         error_reply=_ERROR_REPLY,
         timezone=settings.display_tz,
         unprompted_reply_chance=settings.unprompted_reply_chance,
+        unprompted_react_share=settings.unprompted_react_share,
     )
 
     log.info(

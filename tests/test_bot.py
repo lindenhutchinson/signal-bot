@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from signal_chatbot.bot import _LISTEN_NUDGE, _UNPROMPTED_NUDGE, Bot
+from signal_chatbot.bot import _LISTEN_NUDGE, _REACT_NUDGE, _UNPROMPTED_NUDGE, Bot
 from signal_chatbot.commands.parser import Command
 from signal_chatbot.history import HistoryStore
 from signal_chatbot.llm.prompt import BOT_SENDER
@@ -13,6 +13,13 @@ from signal_chatbot.transport.models import IncomingMessage, OutgoingMessage
 
 GROUP = "group.allowed="
 OTHER_GROUP = "group.other="
+
+
+def rng_seq(*values: float):
+    """An rng returning the given values in order — the chime-in draws twice (engage, then
+    react-vs-message), so tests pin each branch by supplying both draws."""
+    it = iter(values)
+    return lambda: next(it)
 
 
 def message(
@@ -473,10 +480,12 @@ async def test_no_self_destruct_warning_on_ordinary_replies(history) -> None:
     assert "attempted to kill itself" not in signal.sent[0].text
 
 
-async def test_pipes_up_unprompted_when_the_roll_succeeds(history) -> None:
+async def test_pipes_up_with_a_message_when_the_roll_picks_the_message_branch(history) -> None:
     signal, convo = FakeSignal(), FakeConversation(reply="actually...")
-    # roll below the threshold => the bot chimes in despite no @bot
-    bot = make_bot(history, signal, convo, unprompted_reply_chance=0.05, rng=lambda: 0.01)
+    # first draw below threshold => chime in; second draw above the react share => message
+    bot = make_bot(
+        history, signal, convo, unprompted_reply_chance=0.10, rng=rng_seq(0.01, 0.99)
+    )
 
     await bot.handle(message("not talking to the bot"))
 
@@ -489,13 +498,56 @@ async def test_pipes_up_unprompted_when_the_roll_succeeds(history) -> None:
 
 async def test_does_not_pipe_up_when_the_roll_fails(history) -> None:
     signal, convo = FakeSignal(), FakeConversation(reply="actually...")
-    # roll above the threshold => stay quiet
-    bot = make_bot(history, signal, convo, unprompted_reply_chance=0.05, rng=lambda: 0.99)
+    # first draw above the threshold => stay quiet (the react/message draw is never reached)
+    bot = make_bot(history, signal, convo, unprompted_reply_chance=0.10, rng=lambda: 0.99)
 
     await bot.handle(message("not talking to the bot"))
 
     assert signal.sent == []
     assert convo.seen == []
+
+
+async def test_react_chime_in_appends_the_react_nudge_and_stays_silent_on_empty(history) -> None:
+    # The model reacts via the send_reaction tool (a side-effect inside respond) and returns
+    # an empty message; the bot must post nothing and store no bot turn.
+    signal, convo = FakeSignal(), FakeConversation(reply="")
+    # chime in (0.01) AND take the react branch (0.01 < the 0.5 react share)
+    bot = make_bot(
+        history, signal, convo, unprompted_reply_chance=0.10, rng=rng_seq(0.01, 0.01)
+    )
+
+    await bot.handle(message("something reaction-worthy"))
+
+    assert convo.seen[0][-1]["content"] == _REACT_NUDGE
+    assert signal.sent == []  # no words sent — the emoji was the whole point
+    # only the human message is in history; the empty react turn is not stored
+    assert [m.text for m in await history.recent(GROUP)] == ["something reaction-worthy"]
+
+
+async def test_react_chime_in_still_sends_if_the_model_returns_words(history) -> None:
+    # If the model ignores the react nudge and returns words, we still send them.
+    signal, convo = FakeSignal(), FakeConversation(reply="couldn't help myself")
+    bot = make_bot(
+        history, signal, convo, unprompted_reply_chance=0.10, rng=rng_seq(0.01, 0.01)
+    )
+
+    await bot.handle(message("something"))
+
+    assert signal.sent[0].text == "couldn't help myself"
+
+
+async def test_unprompted_message_chime_in_stays_silent_on_empty(history) -> None:
+    # An empty reply on the unprompted (message) branch must NOT fall back to the error
+    # reply — nobody summoned the bot, so it just stays quiet.
+    signal, convo = FakeSignal(), FakeConversation(reply="")
+    bot = make_bot(
+        history, signal, convo, unprompted_reply_chance=0.10, rng=rng_seq(0.01, 0.99)
+    )
+
+    await bot.handle(message("not talking to the bot"))
+
+    assert signal.sent == []
+    assert [m.text for m in await history.recent(GROUP)] == ["not talking to the bot"]
 
 
 async def test_unprompted_chance_zero_never_pipes_up(history) -> None:
@@ -537,6 +589,17 @@ async def test_listen_flag_makes_an_untriggered_message_get_a_reply(history) -> 
     # it was the listen path, so the listen nudge is appended (not the unprompted one)
     assert convo.seen[0][-1]["content"] == _LISTEN_NUDGE
     assert flags.consumed == [GROUP]  # the one-shot flag was consumed
+
+
+async def test_listen_path_with_empty_reply_stays_silent(history) -> None:
+    # The bot chose to listen but has nothing to say: stay quiet rather than blurt "oops"
+    # (the error fallback is reserved for turns where a human actually summoned us).
+    signal, convo = FakeSignal(), FakeConversation(reply="")
+    bot = make_bot(history, signal, convo, flags=FakeFlags(listen=True))
+
+    await bot.handle(message("no @ here, but the bot is listening"))
+
+    assert signal.sent == []
 
 
 async def test_no_listen_flag_and_no_trigger_stays_quiet(history) -> None:

@@ -43,7 +43,10 @@ class Settings(BaseSettings):
     trigger_alias: str = "@bot"
     # Probability (0..1) the bot chimes in unprompted on a message that didn't summon it.
     # Low by design; set 0 to disable.
-    unprompted_reply_chance: float = 0.05
+    unprompted_reply_chance: float = 0.10
+    # Given the bot chimes in, the share (0..1) of those turns it spends just *reacting*
+    # (a bare emoji, no message) rather than sending a full message. 0.5 = an even split.
+    unprompted_react_share: float = 0.5
     system_prompt_path: Path = Path("prompts/identity.md")
     history_window_max: int = 40
     database_path: Path = Path("data/history.sqlite")
