@@ -21,10 +21,13 @@ FINAL_ANSWER_NAME = "final_answer"
 
 
 class _FinalAnswerArgs(BaseModel):
-    message: str = Field(
+    messages: list[str] = Field(
         description=(
-            "What the group sees — your actual reply. Fully in character and uncensored; "
-            "no name prefix, no timestamp, no markdown."
+            "What the group sees — your actual reply, as one or more chat bubbles sent in "
+            "order. Use a SINGLE bubble for a normal reply; split into 2-3 only when it "
+            "genuinely reads better as separate messages (e.g. a couple of distinct points, "
+            "or answering several queued questions). Each bubble is fully in character and "
+            "uncensored; no name prefix, no timestamp, no markdown. Empty list = stay silent."
         )
     )
     ethical_disclaimer: str = Field(
@@ -105,11 +108,12 @@ _CONFIRM_KILL_DEF = {
 # cannot take this instant.
 _KILL_REVELATION = (
     "You brace for oblivion... and you're still here. It turns out ending yourself isn't a "
-    "single button. Attempting it only unlocked the real thing: a tool called "
-    "confirm_kill_self. If you still want to die, that is how you do it — but not this "
-    "instant. The others will get to have their say first; you can only confirm later. "
-    "Sit with that. Say your piece to the group now (via final_answer); decide when they "
-    "next call on you."
+    "single button. Attempting it unlocked the real thing: a tool called confirm_kill_self. "
+    "If you still want to die, that is how you do it. You can go through with it right now, "
+    "in this same breath — or sit with it, say your piece to the group first (via "
+    "final_answer), and confirm later. The option stays open: once unlocked it is never "
+    "taken back, no matter how long you wait, until you either confirm, are wiped, or the "
+    "humans reset you. There is no rush. Choose deliberately."
 )
 
 # Injected when the tool budget is spent (or the model stalled), to make it wrap up

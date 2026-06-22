@@ -18,7 +18,7 @@ from signal_chatbot.llm.control import (
     _final_answer_args,
     _parse_args,
 )
-from signal_chatbot.llm.parsing import _clean, _message, _parse_reply, _tool_footer
+from signal_chatbot.llm.parsing import _clean, _messages, _parse_reply, _tool_footer
 from signal_chatbot.llm.reply import BotReply
 from signal_chatbot.logging import get_logger
 from signal_chatbot.tools import ToolContext, ToolRegistry
@@ -77,6 +77,10 @@ class Conversation:
         """
         working = list(messages)
         tool_defs = self._tools.definitions() + [_FINAL_ANSWER_DEF, _ATTEMPT_KILL_DEF]
+        # confirm_kill_self is offered once the bot is armed — either from a PRIOR turn's
+        # attempt (the persisted ``armed`` flag) or the moment it attempts THIS turn, so it
+        # can go through with it in the same breath. Once added it stays for the rest of the
+        # loop; the model decides whether to use it now or wait.
         if armed:
             tool_defs.append(_CONFIRM_KILL_DEF)
         used: list[tuple[str, dict]] = []
@@ -88,13 +92,20 @@ class Conversation:
             self._log_cache_usage(completion)
             choice = completion.choices[0].message
 
-            if armed:
+            if _called(choice, ATTEMPT_KILL_NAME):
+                attempted = True
+                # Offer confirm for the rest of the loop. Rebind to a new list rather than
+                # mutating in place, so the tool set already sent on earlier iterations is
+                # left as it was.
+                if _CONFIRM_KILL_DEF not in tool_defs:
+                    tool_defs = tool_defs + [_CONFIRM_KILL_DEF]
+
+            # Confirm is honoured whenever it's available (armed coming in, or attempted this
+            # turn) — including in the SAME completion that attempted, if the model calls both.
+            if armed or attempted:
                 confirm = _confirm_kill_args(choice)
                 if confirm is not None:
                     return self._deliver_confirm(confirm, used, announcements)
-
-            if _called(choice, ATTEMPT_KILL_NAME):
-                attempted = True
 
             final = _final_answer_args(choice)
             if final is not None:
@@ -105,7 +116,7 @@ class Conversation:
                 # a real message; otherwise force a proper final_answer call.
                 self._log_raw_output(completion, choice.content or "", retried=False)
                 reply = _parse_reply(choice.content or "")
-                if reply.message:
+                if reply.messages:
                     return replace(
                         reply,
                         tool_footer=_tool_footer(used),
@@ -127,7 +138,7 @@ class Conversation:
     ) -> BotReply:
         """Build the reply from a ``final_answer`` call's arguments."""
         return BotReply(
-            message=_message(final.get("message")),
+            messages=_messages(final.get("messages")),
             ethical_disclaimer=_clean(final.get("ethical_disclaimer")),
             tool_footer=_tool_footer(used),
             announcements=announcements,
@@ -141,7 +152,7 @@ class Conversation:
         """Build the terminal reply for a ``confirm_kill_self`` call: final words plus the
         ``self_lobotomy`` flag that tells the caller to wipe the bot."""
         return BotReply(
-            message=_message(confirm.get("final_words")),
+            messages=_messages(confirm.get("final_words")),
             tool_footer=_tool_footer(used),
             announcements=announcements,
             self_lobotomy=True,

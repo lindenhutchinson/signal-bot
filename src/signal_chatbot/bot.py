@@ -12,9 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import random
-from collections import defaultdict
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import tzinfo
 from typing import Protocol
 
@@ -67,6 +66,36 @@ _REACT_NUDGE = (
     "final_answer with an EMPTY message. Send no words. If nothing's worth reacting to, "
     "just call final_answer with an empty message and react to nothing.)"
 )
+
+
+# Reasons a message engages the bot, in precedence order (highest first). When a burst is
+# folded into a single follow-up, the strongest reason wins: a real summon beats a listen,
+# which beats an unprompted message, which beats a bare reaction.
+_REASON_PRIORITY = {"prompted": 3, "listen": 2, "unprompted": 1, "react": 0}
+_REASON_KWARGS: dict[str, dict] = {
+    "prompted": {},
+    "listen": {"via_listen": True},
+    "unprompted": {"unprompted": True},
+    "react": {"react": True},
+}
+
+
+@dataclass(frozen=True, slots=True)
+class _Pending:
+    """A queued reason to reply, carrying the latest triggering message's timestamp."""
+
+    timestamp: int
+    reason: str
+
+    def kwargs(self) -> dict:
+        return _REASON_KWARGS[self.reason]
+
+    def merge(self, other: _Pending | None) -> _Pending:
+        """Combine with an already-folded pending: strongest reason, latest timestamp."""
+        if other is None:
+            return self
+        reason = max(self.reason, other.reason, key=_REASON_PRIORITY.__getitem__)
+        return _Pending(max(self.timestamp, other.timestamp), reason)
 
 
 class Responder(Protocol):
@@ -190,7 +219,10 @@ class Bot:
         self._unprompted_chance = unprompted_reply_chance
         self._react_share = unprompted_react_share
         self._rng = rng
-        self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        # One reply runs per group at a time; messages that land while it's in flight fold
+        # into a single follow-up (see _dispatch). The task self-removes when it drains.
+        self._reply_tasks: dict[str, asyncio.Task] = {}
+        self._pending: dict[str, _Pending] = {}
 
     async def run(self) -> None:
         """Consume the Signal stream forever."""
@@ -232,23 +264,53 @@ class Bot:
             sender_number=message.sender_number,
         )
 
-        triggered = self._trigger in message.text.lower()
-        # The bot may have asked (last turn) to hear whatever was said next: consume that
-        # one-shot flag and treat this message as addressed to it.
-        listening = not triggered and await self._flags.consume_listen(message.group_id)
-        if triggered or listening:
-            async with self._locks[message.group_id]:
-                await self._reply(message.group_id, message.timestamp, via_listen=listening)
-            return
+        pending = await self._classify(message)
+        if pending is not None:
+            self._dispatch(message.group_id, pending)
 
-        # Unprompted chime-in: a low-chance roll to engage at all, then a coin flip on
-        # whether this turn is a bare reaction or a full message.
+    async def _classify(self, message: IncomingMessage) -> _Pending | None:
+        """Decide whether (and why) this message warrants a reply, without producing one.
+
+        Returns the engagement reason: a trigger summons us (``prompted``); otherwise the
+        one-shot listen flag (``listen``) is consumed and honoured; otherwise a low-chance
+        roll may chime in unprompted, as a bare reaction or a full message. ``None`` = stay
+        out. The listen flag is only consumed when there's no trigger, matching the original.
+        """
+        if self._trigger in message.text.lower():
+            return _Pending(message.timestamp, "prompted")
+        if await self._flags.consume_listen(message.group_id):
+            return _Pending(message.timestamp, "listen")
         if self._should_pipe_up():
-            async with self._locks[message.group_id]:
-                if self._should_react():
-                    await self._reply(message.group_id, message.timestamp, react=True)
-                else:
-                    await self._reply(message.group_id, message.timestamp, unprompted=True)
+            return _Pending(message.timestamp, "react" if self._should_react() else "unprompted")
+        return None
+
+    def _dispatch(self, group_id: str, pending: _Pending) -> None:
+        """Reply to ``pending`` now, or fold it into the in-flight reply for the group.
+
+        The first engaging message starts a reply task immediately ("reply now"). Anything
+        that lands while that reply is in flight is folded into ONE pending follow-up
+        ("fold extras") — strongest reason and latest timestamp win — so a fast burst of
+        @bots produces a reply plus at most one follow-up, never a reply per message.
+        """
+        if group_id in self._reply_tasks:
+            self._pending[group_id] = pending.merge(self._pending.get(group_id))
+            return
+        self._reply_tasks[group_id] = asyncio.create_task(self._reply_worker(group_id, pending))
+
+    async def _reply_worker(self, group_id: str, pending: _Pending) -> None:
+        """Produce the reply, then drain any follow-up that folded in while it ran."""
+        current: _Pending | None = pending
+        try:
+            while current is not None:
+                await self._reply(group_id, current.timestamp, **current.kwargs())
+                current = self._pending.pop(group_id, None)
+        finally:
+            self._reply_tasks.pop(group_id, None)
+
+    async def join(self) -> None:
+        """Await all in-flight reply tasks (used at shutdown and in tests)."""
+        while self._reply_tasks:
+            await asyncio.gather(*self._reply_tasks.values(), return_exceptions=True)
 
     def _should_pipe_up(self) -> bool:
         """Roll the dice on chiming in unprompted (low chance, off when 0)."""
@@ -300,19 +362,26 @@ class Bot:
             reply = await self._conversation.respond(messages, ctx, armed=armed)
         except Exception as exc:  # noqa: BLE001 - never let one message kill the loop
             log.error("bot.reply_failed", group=group_id, error=str(exc))
-            reply = BotReply(message="")
+            reply = BotReply()
 
         if reply.self_lobotomy:
             await self._self_reset(group_id, reply.message, timestamp)
             return
 
-        # The model sometimes leaks an "Ethical disclaimer:" section into the message text
-        # instead of the field. Split it back out so it never reaches the chat; if the
-        # field itself was empty, the leaked text becomes the logged disclaimer.
-        message, leaked = split_off_disclaimer(reply.message.strip())
-        disclaimer = reply.ethical_disclaimer or leaked
-        has_message = bool(message)
-        # An empty message falls back to the error reply ONLY when a human actually summoned
+        # The model sometimes leaks an "Ethical disclaimer:" section into a message bubble
+        # instead of the field. Split it back out of each bubble so it never reaches the
+        # chat; if the field itself was empty, the leaked text becomes the logged disclaimer.
+        bubbles: list[str] = []
+        leaked_parts: list[str] = []
+        for raw in reply.messages:
+            body, leaked = split_off_disclaimer(raw.strip())
+            if body:
+                bubbles.append(body)
+            if leaked:
+                leaked_parts.append(leaked)
+        disclaimer = reply.ethical_disclaimer or "\n\n".join(leaked_parts)
+        has_message = bool(bubbles)
+        # An empty reply falls back to the error reply ONLY when a human actually summoned
         # us. On the unprompted/listen/react paths nobody is waiting, so we stay silent
         # rather than blurt the error string — a react turn has already fired its emoji as a
         # side-effect during respond, and the words it deliberately withheld are the point.
@@ -320,29 +389,21 @@ class Bot:
         if disclaimer:
             await self._disclaimers.add_disclaimer(
                 group_id,
-                message=message or self._error_reply,
+                message=bubbles[0] if bubbles else self._error_reply,
                 disclaimer=disclaimer,
                 created_at=timestamp,
             )
         if has_message:
-            # The self-destruct warning and the tool-usage footer are shown to the group but
-            # kept OUT of history: storing them would let the model see them in its own past
-            # turns and learn to fake them.
-            warning = self._self_destruct_warning() if reply.attempted_self_destruct else ""
-            sent = warning + message + reply.tool_footer
-            # Quoting applies only to the main reply.
-            quote = self._resolve_quote(history, reply.reply_to_index)
-            outgoing = OutgoingMessage(group_id=group_id, text=sent)
-            if quote is not None:
-                outgoing = replace(
-                    outgoing,
-                    quote_timestamp=quote.timestamp,
-                    quote_author=quote.sender_number,
-                    quote_message=quote.text,
-                )
-            await self._signal.send(outgoing)
+            await self._send_bubbles(group_id, bubbles, reply, history)
+            # Store the bubbles as a single bot turn. The self-destruct warning and the
+            # tool-usage footer are shown to the group but kept OUT of history: storing them
+            # would let the model see them in its own past turns and learn to fake them.
             await self._history.append(
-                group_id, sender=BOT_SENDER, text=message, timestamp=timestamp, sender_number=""
+                group_id,
+                sender=BOT_SENDER,
+                text="\n\n".join(bubbles),
+                timestamp=timestamp,
+                sender_number="",
             )
         elif prompted:
             # Summoned, but the model produced nothing — send the fallback so the human who
@@ -366,6 +427,30 @@ class Bot:
         if reply.attempted_self_destruct:
             await self._flags.arm(group_id)
             log.info("bot.self_destruct_armed", group=group_id)
+
+    async def _send_bubbles(
+        self, group_id: str, bubbles: list[str], reply: BotReply, history: list
+    ) -> None:
+        """Send the reply as one Signal message per bubble, in order.
+
+        The self-destruct warning prefixes the FIRST bubble and the tool-usage footer
+        suffixes the LAST, so the warning leads and the "what I looked up" note trails the
+        whole reply. A quote (``reply_to``) is attached to the first bubble only.
+        """
+        warning = self._self_destruct_warning() if reply.attempted_self_destruct else ""
+        quote = self._resolve_quote(history, reply.reply_to_index)
+        last = len(bubbles) - 1
+        for i, body in enumerate(bubbles):
+            text = (warning if i == 0 else "") + body + (reply.tool_footer if i == last else "")
+            outgoing = OutgoingMessage(group_id=group_id, text=text)
+            if i == 0 and quote is not None:
+                outgoing = replace(
+                    outgoing,
+                    quote_timestamp=quote.timestamp,
+                    quote_author=quote.sender_number,
+                    quote_message=quote.text,
+                )
+            await self._signal.send(outgoing)
 
     @staticmethod
     def _resolve_quote(history: list, index: int | None):

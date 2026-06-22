@@ -32,6 +32,7 @@ HELP_TEXT = (
     "  @disclaimers    Show the asides the bot attached to its messages.\n"
     "  @profiles       Show what the bot remembers about people.\n"
     "  @finalwords     Show the parting words of every past incarnation.\n"
+    "  @finalwords clear  Erase the final-words archive (the one thing wipes spare).\n"
     "  @flags          Show the bot's flags and their values.\n"
     "  @flag <n> reset Reset flag number <n> to its default.\n"
     "\n"
@@ -47,6 +48,7 @@ HELP_TEXT = (
 )
 
 USAGE_FLAG = "Usage: @flag <n> reset — resets flag number <n> to its default. See @flags."
+USAGE_FINALWORDS = "Usage: @finalwords (show them) or @finalwords clear (erase the archive)."
 
 
 def format_info(summaries: Sequence[tuple[str, str]]) -> str:
@@ -106,6 +108,14 @@ def format_finalwords(entries: Sequence[FinalWords], *, tz: tzinfo) -> str:
         when = format_timestamp(fw.created_at, tz)
         lines.append(f'[{when}] {fw.name}: "{fw.text}"')
     return "\n".join(lines)
+
+
+def format_finalwords_cleared(removed: int) -> str:
+    """Confirm the archive was erased, noting how many parting messages were removed."""
+    if removed == 0:
+        return "No final words to clear — the archive was already empty."
+    plural = "s" if removed != 1 else ""
+    return f"Final-words archive cleared — erased {removed} parting message{plural}. 🧽"
 
 
 def format_flags(flags: Sequence[FlagView]) -> str:

@@ -8,6 +8,9 @@ incarnation can be shown them (and humans can read them via ``@finalwords``).
 An entry is recorded when a bot leaves words behind: the ``@reset`` farewell and a
 self-kill's final words. A bare ``@lobotomy`` records nothing (no goodbye) but the
 existing archive survives it untouched.
+
+No *automatic* wipe ever touches it. It can only be cleared by an explicit human
+``@finalwords clear`` command (:meth:`clear`).
 """
 
 from __future__ import annotations
@@ -27,9 +30,10 @@ class FinalWords:
 
 
 class FinalWordsStore:
-    """Append-only persistence for the final words of past incarnations.
+    """Persistence for the final words of past incarnations.
 
-    There is deliberately no ``clear`` method — the archive outlives every wipe.
+    The archive outlives every *automatic* wipe (``@reset``, ``@lobotomy``, self-kill);
+    only an explicit ``@finalwords clear`` (:meth:`clear`) empties it.
     """
 
     SCHEMA = """
@@ -62,3 +66,15 @@ class FinalWordsStore:
         )
         rows = await cursor.fetchall()
         return [FinalWords(r["name"], r["text"], r["created_at"]) for r in rows]
+
+    async def clear(self, group_id: str) -> int:
+        """Erase a group's archived final words. Returns how many entries were removed.
+
+        Only ever called by the explicit ``@finalwords clear`` command — no wipe path
+        touches this table.
+        """
+        cursor = await self._conn.execute(
+            "DELETE FROM final_words WHERE group_id = ?", (group_id,)
+        )
+        await self._conn.commit()
+        return cursor.rowcount

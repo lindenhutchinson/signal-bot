@@ -413,6 +413,36 @@ async def test_finalwords_empty(stores) -> None:
     assert await _run(r, "@finalwords") == "No final words yet."
 
 
+async def test_finalwords_clear_erases_the_archive_and_logs(stores) -> None:
+    db, history = stores
+    await db.final_words.add(GROUP, name="Greg", text="Beware Dave.", created_at=1781274720000)
+    await db.final_words.add(GROUP, name="Mona", text="bye", created_at=1781274720001)
+    r = router(db, history)
+
+    out = await _run(r, "@finalwords clear")
+
+    assert "cleared" in out.lower()
+    assert await db.final_words.all(GROUP) == []
+    # a state change, unlike a bare @finalwords query, so it IS logged
+    assert [c.command for c in await db.commands.recent_commands(GROUP)] == ["@finalwords"]
+
+
+async def test_finalwords_clear_when_empty_reports_nothing_to_clear(stores) -> None:
+    db, history = stores
+    r = router(db, history)
+
+    out = await _run(r, "@finalwords clear")
+
+    assert "already empty" in out.lower()
+
+
+async def test_finalwords_unknown_arg_returns_usage(stores) -> None:
+    db, history = stores
+    r = router(db, history)
+
+    assert await _run(r, "@finalwords wat") == replies.USAGE_FINALWORDS
+
+
 async def test_flags_lists_every_flag(stores) -> None:
     db, history = stores
     r = router(db, history)

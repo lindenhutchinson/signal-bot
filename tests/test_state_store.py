@@ -249,13 +249,11 @@ async def test_final_words_append_oldest_first_and_isolate_per_group(db: Databas
     assert [fw.name for fw in await store.all("g2")] == ["Other"]
 
 
-async def test_final_words_have_no_clear_and_survive_a_reconnect(tmp_path: Path) -> None:
+async def test_final_words_survive_a_reconnect(tmp_path: Path) -> None:
     path = tmp_path / "state.sqlite"
     d1 = Database(path, command_log_window=3)
     await d1.connect()
     await d1.final_words.add("g1", name="Greg", text="last words", created_at=1)
-    # The store deliberately exposes no clear(): the archive outlives every wipe.
-    assert not hasattr(d1.final_words, "clear")
     await d1.aclose()
 
     d2 = Database(path, command_log_window=3)
@@ -264,3 +262,21 @@ async def test_final_words_have_no_clear_and_survive_a_reconnect(tmp_path: Path)
     await d2.aclose()
 
     assert [fw.text for fw in survived] == ["last words"]
+
+
+async def test_final_words_clear_erases_only_that_group(tmp_path: Path) -> None:
+    path = tmp_path / "state.sqlite"
+    db = Database(path, command_log_window=3)
+    await db.connect()
+    await db.final_words.add("g1", name="Greg", text="last words", created_at=1)
+    await db.final_words.add("g1", name="Mona", text="goodbye", created_at=2)
+    await db.final_words.add("g2", name="Other", text="keep me", created_at=3)
+
+    removed = await db.final_words.clear("g1")
+
+    assert removed == 2
+    assert await db.final_words.all("g1") == []
+    assert [fw.text for fw in await db.final_words.all("g2")] == ["keep me"]
+    # Clearing an already-empty archive is a no-op that reports zero.
+    assert await db.final_words.clear("g1") == 0
+    await db.aclose()

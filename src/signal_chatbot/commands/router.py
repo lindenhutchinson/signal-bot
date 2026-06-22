@@ -87,9 +87,7 @@ class CommandRouter:
             case CommandName.PROFILES:
                 return replies.format_profiles(await self._profiles.all(message.group_id))
             case CommandName.FINALWORDS:
-                return replies.format_finalwords(
-                    await self._final_words.all(message.group_id), tz=self._timezone
-                )
+                return await self._finalwords(message, command.arg.strip())
             case CommandName.FLAGS:
                 return replies.format_flags(await self._flags.view(message.group_id))
             case CommandName.FLAG:
@@ -123,6 +121,18 @@ class CommandRouter:
         )
         await self._log(message, command.name)
         return ok
+
+    async def _finalwords(self, message: IncomingMessage, arg: str) -> str:
+        """Show the lineage (``@finalwords``) or erase it (``@finalwords clear``)."""
+        if not arg:
+            return replies.format_finalwords(
+                await self._final_words.all(message.group_id), tz=self._timezone
+            )
+        if arg.lower() != "clear":
+            return replies.USAGE_FINALWORDS
+        removed = await self._final_words.clear(message.group_id)
+        await self._log(message, CommandName.FINALWORDS)
+        return replies.format_finalwords_cleared(removed)
 
     async def _flag(self, message: IncomingMessage, arg: str) -> str:
         """Handle ``@flag <n> reset`` — restore a single flag to its default."""

@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -73,7 +74,7 @@ class FakeConversation:
         if self.error is not None:
             raise self.error
         return BotReply(
-            message=self.reply,
+            messages=[self.reply] if self.reply else [],
             ethical_disclaimer=self.disclaimer,
             tool_footer=self.footer,
             announcements=list(self.announcements),
@@ -214,6 +215,7 @@ async def test_ignores_messages_from_other_groups(history) -> None:
     bot = make_bot(history, signal, convo)
 
     await bot.handle(message("@bot hi", group=OTHER_GROUP))
+    await bot.join()
 
     assert signal.sent == []
     assert await history.recent(OTHER_GROUP) == []
@@ -224,6 +226,7 @@ async def test_stores_untriggered_messages_but_does_not_reply(history) -> None:
     bot = make_bot(history, signal, convo)
 
     await bot.handle(message("just chatting"))
+    await bot.join()
 
     assert signal.sent == []
     assert [m.text for m in await history.recent(GROUP)] == ["just chatting"]
@@ -234,6 +237,7 @@ async def test_replies_when_triggered_and_records_reply(history) -> None:
     bot = make_bot(history, signal, convo)
 
     await bot.handle(message("@bot hello"))
+    await bot.join()
 
     assert len(signal.sent) == 1
     assert signal.sent[0].group_id == GROUP
@@ -249,6 +253,7 @@ async def test_trigger_is_case_insensitive(history) -> None:
     bot = make_bot(history, signal, convo)
 
     await bot.handle(message("Hey @BOT what's up"))
+    await bot.join()
 
     assert len(signal.sent) == 1
 
@@ -258,6 +263,7 @@ async def test_sender_allowlist_blocks_other_senders(history) -> None:
     bot = make_bot(history, signal, convo, allowed_senders=["+61400000999"])
 
     await bot.handle(message("@bot hi", sender_number="+61400000001"))
+    await bot.join()
 
     assert signal.sent == []
     assert await history.recent(GROUP) == []
@@ -269,6 +275,7 @@ async def test_error_during_completion_sends_fallback_reply(history) -> None:
     bot = make_bot(history, signal, convo)
 
     await bot.handle(message("@bot hi"))
+    await bot.join()
 
     assert signal.sent[0].text == "oops"
 
@@ -279,6 +286,7 @@ async def test_command_is_intercepted_replied_and_kept_out_of_history(history) -
     bot = make_bot(history, signal, convo, commands=commands)
 
     await bot.handle(message("@rule no puns"))
+    await bot.join()
 
     assert [c.name.value for c in commands.handled] == ["rule"]
     assert signal.sent[0].text == "Rule logged. ⚖️"
@@ -292,6 +300,7 @@ async def test_failing_command_sends_fallback_and_does_not_raise(history) -> Non
     bot = make_bot(history, signal, convo, commands=commands)
 
     await bot.handle(message("@rule x"))
+    await bot.join()
 
     assert signal.sent[0].text == "oops"
 
@@ -302,6 +311,7 @@ async def test_command_from_disallowed_group_is_ignored(history) -> None:
     bot = make_bot(history, signal, convo, commands=commands)
 
     await bot.handle(message("@rule x", group=OTHER_GROUP))
+    await bot.join()
 
     assert commands.handled == []
     assert signal.sent == []
@@ -314,6 +324,7 @@ async def test_ethical_disclaimer_is_logged_but_not_sent(history) -> None:
     bot = make_bot(history, signal, convo, disclaimers=disclaimers)
 
     await bot.handle(message("@bot roast us"))
+    await bot.join()
 
     assert signal.sent[0].text == "you're all doomed"  # disclaimer never reaches Signal
     assert disclaimers.logged == [(GROUP, "you're all doomed", "jk, love you", 1)]
@@ -326,6 +337,7 @@ async def test_tool_footer_is_sent_but_kept_out_of_history(history) -> None:
     bot = make_bot(history, signal, convo)
 
     await bot.handle(message("@bot tell me about mercury"))
+    await bot.join()
 
     # the group sees the footer appended...
     assert signal.sent[0].text == "here's the scoop" + footer
@@ -340,6 +352,7 @@ async def test_announcements_are_sent_as_their_own_messages_after_the_reply(hist
     bot = make_bot(history, signal, convo)
 
     await bot.handle(message("@bot do it"))
+    await bot.join()
 
     # main reply first, then each announcement as its own message
     assert [m.text for m in signal.sent] == ["here you go", "📢 a rule", "📜 some lore"]
@@ -358,6 +371,7 @@ async def test_reply_with_reply_to_index_quotes_the_matching_message(history) ->
     )
 
     await bot.handle(message("@bot reply to bob"))
+    await bot.join()
 
     # The triggering message is also quotable, so the window is [Bob, Alice's @bot] —
     # reply_to_index=1 points at Bob's message.
@@ -374,6 +388,7 @@ async def test_reply_with_out_of_range_index_sends_no_quote(history) -> None:
     bot = make_bot(history, signal, convo)
 
     await bot.handle(message("@bot hi"))
+    await bot.join()
 
     out = signal.sent[0]
     assert out.text == "oops wrong number"
@@ -388,6 +403,7 @@ async def test_reply_without_reply_to_index_sends_no_quote(history) -> None:
     bot = make_bot(history, signal, convo)
 
     await bot.handle(message("@bot hi"))
+    await bot.join()
 
     assert signal.sent[0].quote_timestamp is None
 
@@ -398,6 +414,7 @@ async def test_tool_footer_suppressed_on_error_fallback(history) -> None:
     bot = make_bot(history, signal, convo)
 
     await bot.handle(message("@bot hi"))
+    await bot.join()
 
     assert signal.sent[0].text == "oops"
 
@@ -409,6 +426,7 @@ async def test_no_disclaimer_logged_when_field_is_empty(history) -> None:
     bot = make_bot(history, signal, convo, disclaimers=disclaimers)
 
     await bot.handle(message("@bot hi"))
+    await bot.join()
 
     assert disclaimers.logged == []
 
@@ -419,6 +437,7 @@ async def test_reply_threads_directives_and_command_log(history) -> None:
     bot = make_bot(history, signal, convo, state=state)
 
     await bot.handle(message("@bot hello"))
+    await bot.join()
 
     assert state.directives_calls == [GROUP]  # state read on the reply path
     assert signal.sent[0].text == "hi"
@@ -430,6 +449,7 @@ async def test_reply_fetches_profiles_and_passes_them_into_the_prompt(history) -
     bot = make_bot(history, signal, convo, state=state)
 
     await bot.handle(message("@bot hello"))
+    await bot.join()
 
     assert state.profiles_calls == [GROUP]  # profiles read on the reply path
     system = convo.seen[0][0]["content"]
@@ -442,6 +462,7 @@ async def test_armed_state_is_passed_to_the_conversation(history) -> None:
     bot = make_bot(history, signal, convo, flags=FakeFlags(armed=True))
 
     await bot.handle(message("@bot hello"))
+    await bot.join()
 
     assert convo.seen_armed == [True]
 
@@ -453,6 +474,7 @@ async def test_attempt_arms_self_destruct_warns_and_still_sends_the_reply(histor
     bot = make_bot(history, signal, convo, flags=flags, name=FakeName("Greg"))
 
     await bot.handle(message("@bot just end it"))
+    await bot.join()
 
     # the group sees the prewritten warning prefix above the bot's goodbye
     assert signal.sent[0].text == "⚠️ Greg attempted to kill itself.\n\ngoodbye cruel world"
@@ -467,6 +489,7 @@ async def test_self_destruct_warning_uses_the_current_name(history) -> None:
     bot = make_bot(history, signal, convo, name=FakeName("Mxyzptlk"))
 
     await bot.handle(message("@bot end it"))
+    await bot.join()
 
     assert signal.sent[0].text.startswith("⚠️ Mxyzptlk attempted to kill itself.")
 
@@ -476,6 +499,7 @@ async def test_no_self_destruct_warning_on_ordinary_replies(history) -> None:
     bot = make_bot(history, signal, convo)
 
     await bot.handle(message("@bot hi"))
+    await bot.join()
 
     assert "attempted to kill itself" not in signal.sent[0].text
 
@@ -488,6 +512,7 @@ async def test_pipes_up_with_a_message_when_the_roll_picks_the_message_branch(hi
     )
 
     await bot.handle(message("not talking to the bot"))
+    await bot.join()
 
     assert signal.sent[0].text == "actually..."
     # the unprompted nudge was appended so the model knows to read the room
@@ -502,6 +527,7 @@ async def test_does_not_pipe_up_when_the_roll_fails(history) -> None:
     bot = make_bot(history, signal, convo, unprompted_reply_chance=0.10, rng=lambda: 0.99)
 
     await bot.handle(message("not talking to the bot"))
+    await bot.join()
 
     assert signal.sent == []
     assert convo.seen == []
@@ -517,6 +543,7 @@ async def test_react_chime_in_appends_the_react_nudge_and_stays_silent_on_empty(
     )
 
     await bot.handle(message("something reaction-worthy"))
+    await bot.join()
 
     assert convo.seen[0][-1]["content"] == _REACT_NUDGE
     assert signal.sent == []  # no words sent — the emoji was the whole point
@@ -532,6 +559,7 @@ async def test_react_chime_in_still_sends_if_the_model_returns_words(history) ->
     )
 
     await bot.handle(message("something"))
+    await bot.join()
 
     assert signal.sent[0].text == "couldn't help myself"
 
@@ -545,6 +573,7 @@ async def test_unprompted_message_chime_in_stays_silent_on_empty(history) -> Non
     )
 
     await bot.handle(message("not talking to the bot"))
+    await bot.join()
 
     assert signal.sent == []
     assert [m.text for m in await history.recent(GROUP)] == ["not talking to the bot"]
@@ -562,6 +591,7 @@ async def test_unprompted_chance_zero_never_pipes_up(history) -> None:
     bot = make_bot(history, signal, convo, unprompted_reply_chance=0.0, rng=rng)
 
     await bot.handle(message("just chatting"))
+    await bot.join()
 
     assert signal.sent == []
     assert rolled == []  # never even rolled
@@ -573,6 +603,7 @@ async def test_triggered_reply_is_not_marked_unprompted(history) -> None:
     bot = make_bot(history, signal, convo, unprompted_reply_chance=0.05, rng=lambda: 0.0)
 
     await bot.handle(message("@bot hello"))
+    await bot.join()
 
     assert signal.sent[0].text == "hi"
     assert convo.seen[0][-1]["content"] != _UNPROMPTED_NUDGE
@@ -584,6 +615,7 @@ async def test_listen_flag_makes_an_untriggered_message_get_a_reply(history) -> 
     bot = make_bot(history, signal, convo, flags=flags)
 
     await bot.handle(message("no @ here, but the bot is listening"))
+    await bot.join()
 
     assert signal.sent[0].text == "still here"
     # it was the listen path, so the listen nudge is appended (not the unprompted one)
@@ -598,6 +630,7 @@ async def test_listen_path_with_empty_reply_stays_silent(history) -> None:
     bot = make_bot(history, signal, convo, flags=FakeFlags(listen=True))
 
     await bot.handle(message("no @ here, but the bot is listening"))
+    await bot.join()
 
     assert signal.sent == []
 
@@ -608,6 +641,7 @@ async def test_no_listen_flag_and_no_trigger_stays_quiet(history) -> None:
     bot = make_bot(history, signal, convo, flags=flags)
 
     await bot.handle(message("just chatting"))
+    await bot.join()
 
     assert signal.sent == []
     assert convo.seen == []
@@ -619,6 +653,7 @@ async def test_final_words_are_threaded_into_the_prompt(history) -> None:
     bot = make_bot(history, signal, convo, final_words=final_words)
 
     await bot.handle(message("@bot hello"))
+    await bot.join()
 
     system = convo.seen[0][0]["content"]
     assert "## Final words of those who came before you" in system
@@ -632,6 +667,7 @@ async def test_trailing_ethical_disclaimer_is_split_out_and_logged_not_sent(hist
     bot = make_bot(history, signal, convo, disclaimers=disclaimers)
 
     await bot.handle(message("@bot hi"))
+    await bot.join()
 
     # the leaked disclaimer never reaches the chat...
     assert signal.sent[0].text == "here's the real reply"
@@ -656,6 +692,7 @@ async def test_confirm_sends_final_words_archives_them_then_wipes(history) -> No
     )
 
     await bot.handle(message("@bot do it"))
+    await bot.join()
 
     # the death is announced (with the bot's name) above its final words
     assert signal.sent[0].text == "💀 Greg killed itself. Final words:\n\nit was real, goodbye"
@@ -683,7 +720,82 @@ async def test_self_reset_with_empty_final_words_still_announces_archives_and_wi
     )
 
     await bot.handle(message("@bot die"))
+    await bot.join()
 
     assert signal.sent[0].text == "💀 Greg killed itself. Final words:\n\n..."
     assert final_words.added == [(GROUP, "Greg", "...", 1)]
     assert lobotomiser.wiped == [GROUP]
+
+
+class MultiBubbleConvo:
+    """A Responder that returns a fixed list of message bubbles."""
+
+    def __init__(self, bubbles: list[str], *, footer: str = "", reply_to_index=None) -> None:
+        self._bubbles = bubbles
+        self._footer = footer
+        self._reply_to_index = reply_to_index
+
+    async def respond(self, messages, ctx, *, armed: bool = False) -> BotReply:
+        return BotReply(
+            messages=list(self._bubbles),
+            tool_footer=self._footer,
+            reply_to_index=self._reply_to_index,
+        )
+
+
+async def test_multiple_bubbles_each_send_as_their_own_message(history) -> None:
+    signal = FakeSignal()
+    convo = MultiBubbleConvo(["first point", "second point"], footer="\n\n(used: clock)")
+    bot = make_bot(history, signal, convo)
+
+    await bot.handle(message("@bot tell me"))
+    await bot.join()
+
+    # one Signal message per bubble; the footer trails only the LAST bubble
+    assert [m.text for m in signal.sent] == ["first point", "second point\n\n(used: clock)"]
+    # the bubbles are stored as a single bot turn, footer excluded
+    stored = await history.recent(GROUP)
+    assert stored[-1].sender == BOT_SENDER
+    assert stored[-1].text == "first point\n\nsecond point"
+
+
+async def test_quote_attaches_to_the_first_bubble_only(history) -> None:
+    signal = FakeSignal()
+    await history.append(
+        GROUP, sender="Bob", text="what's 2+2", timestamp=1, sender_number="+61400000002"
+    )
+    convo = MultiBubbleConvo(["4", "and 3+3 is 6"], reply_to_index=1)
+    bot = make_bot(history, signal, convo)
+
+    await bot.handle(message("@bot do the math"))
+    await bot.join()
+
+    first, second = signal.sent
+    assert first.quote_message == "what's 2+2"  # the quote rides the first bubble
+    assert second.quote_message is None  # never the rest
+
+
+async def test_burst_of_summons_folds_into_a_single_followup(history) -> None:
+    signal = FakeSignal()
+    gate = asyncio.Event()
+    calls: list[str] = []
+
+    class SlowConvo:
+        async def respond(self, messages, ctx, *, armed: bool = False) -> BotReply:
+            calls.append(ctx.group_id)
+            if len(calls) == 1:
+                await gate.wait()  # hold the first reply in flight
+            return BotReply(messages=["ok"])
+
+    bot = make_bot(history, signal, SlowConvo())
+
+    # the first @bot starts a reply that blocks; two more land while it's in flight
+    await bot.handle(message("@bot one"))
+    await bot.handle(message("@bot two"))
+    await bot.handle(message("@bot three"))
+    gate.set()
+    await bot.join()
+
+    # three summons -> exactly two replies: the immediate one + ONE folded follow-up
+    assert len(calls) == 2
+    assert [m.text for m in signal.sent] == ["ok", "ok"]

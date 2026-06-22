@@ -69,6 +69,17 @@ def _message(value: Any) -> str:
     return _strip_tool_markup(strip_leading_timestamp(_clean(value)))
 
 
+def _messages(value: Any) -> list[str]:
+    """Coerce a ``messages`` value into a list of cleaned, non-empty bubbles.
+
+    Accepts the canonical list-of-strings, but tolerates a bare string (one bubble) or
+    a list holding odd items — every element is cleaned via :func:`_message` and empty
+    results are dropped, so a sloppy value never sends a blank bubble.
+    """
+    items = value if isinstance(value, list) else [value]
+    return [cleaned for item in items if (cleaned := _message(item))]
+
+
 def _dedup(values) -> list[str]:
     seen: list[str] = []
     for value in values:
@@ -106,12 +117,13 @@ def _plural(items: list) -> str:
 
 
 def _extract_reply_object(text: str) -> dict | None:
-    """Find an embedded ``{"message": ...}`` object in ``text``, or ``None``.
+    """Find an embedded ``{"messages": ...}`` (or legacy ``{"message": ...}``) object in
+    ``text``, or ``None``.
 
     Free-form completions (the post-tool path) often wrap the JSON in prose — the
     model "thinks out loud" and then emits the object. Scanning for the first
-    ``{`` that decodes to a dict with a ``message`` key recovers it; trailing prose
-    after the object is ignored via ``raw_decode``.
+    ``{`` that decodes to a dict with a ``messages``/``message`` key recovers it; trailing
+    prose after the object is ignored via ``raw_decode``.
     """
     decoder = json.JSONDecoder()
     idx = text.find("{")
@@ -120,7 +132,7 @@ def _extract_reply_object(text: str) -> dict | None:
             obj, _ = decoder.raw_decode(text, idx)
         except json.JSONDecodeError:
             obj = None
-        if isinstance(obj, dict) and "message" in obj:
+        if isinstance(obj, dict) and ("messages" in obj or "message" in obj):
             return obj
         idx = text.find("{", idx + 1)
     return None
@@ -129,14 +141,16 @@ def _extract_reply_object(text: str) -> dict | None:
 def _parse_reply(content: str) -> BotReply:
     """Parse the model's final content into a :class:`BotReply`.
 
-    Prefers an embedded ``{"message": ..., "ethical_disclaimer": ...}`` object (it may
-    be wrapped in prose or a code fence); falls back to treating the whole content as
-    the message when no such object is present.
+    Prefers an embedded ``{"messages": [...], "ethical_disclaimer": ...}`` object (it may
+    be wrapped in prose or a code fence, and ``message`` is accepted as a legacy alias);
+    falls back to treating the whole content as a single bubble when no such object is
+    present.
     """
     data = _extract_reply_object(_strip_code_fence(content.strip()))
     if data is not None:
+        raw = data["messages"] if "messages" in data else data.get("message")
         return BotReply(
-            message=_message(data.get("message")),
+            messages=_messages(raw),
             ethical_disclaimer=_clean(data.get("ethical_disclaimer")),
         )
-    return BotReply(message=_message(content))
+    return BotReply(messages=_messages(content))

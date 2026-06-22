@@ -46,7 +46,7 @@ def _tool_call(call_id, name, arguments):
 
 def _final(message, ethical_disclaimer=""):
     """A completion in which the model calls final_answer to deliver its reply."""
-    args = {"message": message, "ethical_disclaimer": ethical_disclaimer}
+    args = {"messages": [message], "ethical_disclaimer": ethical_disclaimer}
     return _completion(_message(tool_calls=[_tool_call("f1", FINAL_ANSWER_NAME, args)]))
 
 
@@ -181,7 +181,7 @@ async def test_final_answer_tool_call_delivers_message_and_disclaimer() -> None:
 
 
 def _final_with_reply_to(reply_to):
-    args = {"message": "quoting you", "reply_to": reply_to}
+    args = {"messages": ["quoting you"], "reply_to": reply_to}
     return _completion(_message(tool_calls=[_tool_call("f1", FINAL_ANSWER_NAME, args)]))
 
 
@@ -237,7 +237,7 @@ async def test_final_answer_alongside_info_tool_is_terminal() -> None:
         _message(
             tool_calls=[
                 _tool_call("c1", "echo", {"text": "yo"}),
-                _tool_call("f1", FINAL_ANSWER_NAME, {"message": "done now"}),
+                _tool_call("f1", FINAL_ANSWER_NAME, {"messages": ["done now"]}),
             ]
         )
     )
@@ -497,3 +497,36 @@ async def test_confirm_is_ignored_when_not_armed() -> None:
 
     assert reply.self_lobotomy is False
     assert reply.message == "changed my mind, staying"
+
+
+async def test_confirm_is_unlocked_for_the_rest_of_the_turn_after_an_attempt() -> None:
+    # Not pre-armed: confirm is locked on the first completion, but the instant the bot
+    # attempts it's offered for the rest of the loop — so it can go through same-turn.
+    client = FakeClient(
+        [
+            _tool_only("k1", ATTEMPT_KILL_NAME, {}),
+            _final("on second thought, goodbye"),
+        ]
+    )
+    convo = Conversation(client, ToolRegistry([Echo()]), max_iterations=3)
+
+    await convo.respond([{"role": "user", "content": "end it"}], CTX)
+
+    assert CONFIRM_KILL_NAME not in _offered(client, 0)  # locked before the attempt
+    assert CONFIRM_KILL_NAME in _offered(client, 1)  # unlocked once attempted
+
+
+async def test_attempt_then_confirm_same_turn_wipes_without_being_pre_armed() -> None:
+    client = FakeClient(
+        [
+            _tool_only("k1", ATTEMPT_KILL_NAME, {}),
+            _tool_only("c1", CONFIRM_KILL_NAME, {"final_words": "no second-guessing"}),
+        ]
+    )
+    convo = Conversation(client, ToolRegistry([Echo()]), max_iterations=3)
+
+    reply = await convo.respond([{"role": "user", "content": "do it now"}], CTX)
+
+    assert reply.self_lobotomy is True
+    assert reply.message == "no second-guessing"
+    assert len(client.calls) == 2  # attempt, then confirm — terminal, no wrap-up turn
