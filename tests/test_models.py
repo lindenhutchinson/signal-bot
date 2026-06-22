@@ -2,8 +2,8 @@ from signal_chatbot.transport.models import IncomingMessage
 
 # The raw id signal-cli delivers in a receive envelope, and the matching
 # internal id the REST bridge's /v1/groups and /v2/send expect.
-RAW_GROUP_ID = "RXhhbXBsZVRlc3RHcm91cC0tbm90LWEtcmVhbC1zaWduYWwtaWQtLTAx="
-INTERNAL_GROUP_ID = "group.EXAMPLETESTGROUPID="
+RAW_GROUP_ID = "RXhhbXBsZVRlc3RHcm91cC0tbm90LWEtcmVhbC1zaWduYWwtaWQtLTAx"
+INTERNAL_GROUP_ID = "group.UlhoaGJYQnNaVlJsYzNSSGNtOTFjQzB0Ym05MExXRXRjbVZoYkMxemFXZHVZV3d0YVdRdExUQXg="
 
 
 def _group_text_envelope(text: str = "@bot hi") -> dict:
