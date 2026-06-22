@@ -1,0 +1,57 @@
+# Production stack — runs ALONGSIDE other compose projects (e.g. the home media
+# server) on a shared Docker host. Used STANDALONE (single -f), not merged with
+# docker-compose.yml:
+#   docker compose -p signal-bot -f docker-compose.prod.yml up -d
+# (or just `./deploy/update.sh`). Pulls images published to GHCR by the release
+# workflow — no building on the host. `build:` stays as a local fallback
+# (`up -d --build`). Requires a `.env` (see .env.example).
+#
+# Isolation: this is its own compose project (`-p signal-bot`) with its own
+# bridge network — it cannot see other stacks' service networks. The bot
+# publishes NO ports; the only mapping is the bridge on 127.0.0.1 (loopback,
+# registration only — see deploy/README.md) and is safe to remove afterwards.
+name: signal-bot
+
+# Cap container logs (the default json-file driver is unbounded).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  signal-cli-rest-api:
+    image: ghcr.io/lindenhutchinson/signal-bot/signal-bridge:${SIGNALBOT_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: signal-bridge.Dockerfile
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      # json-rpc mode keeps a persistent connection and serves the receive websocket.
+      MODE: json-rpc
+    volumes:
+      - ./signal-cli-config:/home/.local/share/signal-cli
+    ports:
+      # Loopback only, for one-time registration from the host. Comment out once
+      # the bot is registered and joined — nothing needs to reach the bridge then.
+      - "127.0.0.1:8080:8080"
+    # signal-cli is JVM-based and the heavier of the two services.
+    mem_limit: ${MEM_SIGNAL_BRIDGE:-448m}
+
+  bot:
+    image: ghcr.io/lindenhutchinson/signal-bot/bot:${SIGNALBOT_IMAGE_TAG:-latest}
+    build: .
+    depends_on:
+      - signal-cli-rest-api
+    env_file:
+      - .env
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      # Reach the bridge over the compose network, not localhost.
+      SIGNAL_API_URL: http://signal-cli-rest-api:8080
+    volumes:
+      - ./data:/app/data
+      - ./prompts:/app/prompts:ro
+    mem_limit: ${MEM_BOT:-320m}

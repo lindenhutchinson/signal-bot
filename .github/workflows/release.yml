@@ -1,0 +1,63 @@
+# Build and publish the bot + signal-bridge images to GHCR on each release.
+#
+# Trigger: push a version tag, e.g. `git tag v1.2.3 && git push origin v1.2.3`
+# (deploy/release.sh does this for you). `workflow_dispatch` allows a manual build
+# that publishes only the `latest` tag.
+#
+# Checks (lint + tests) must pass before any image is pushed. Images land at:
+#   ghcr.io/lindenhutchinson/signal-bot/bot:<version>            (+ :latest)
+#   ghcr.io/lindenhutchinson/signal-bot/signal-bridge:<version>  (+ :latest)
+# The host then pulls them via deploy/update.sh — no building on the host.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+
+  images:
+    needs: checks
+    # Tag pushes always build; a manual dispatch only from master — otherwise a
+    # stray run from a branch would overwrite the `latest` tag the host deploys.
+    if: github.event_name == 'push' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: bot
+            dockerfile: Dockerfile
+          - name: signal-bridge
+            dockerfile: signal-bridge.Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/${{ matrix.name }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

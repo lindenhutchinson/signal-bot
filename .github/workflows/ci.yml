@@ -1,0 +1,11 @@
+# Run checks on every push and PR.
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml

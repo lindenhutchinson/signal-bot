@@ -163,39 +163,26 @@ Copy `.env.example` to `.env` and fill it in:
 | `COMMAND_LOG_WINDOW` | Command-activity events kept per group as context (default 40) |
 | `RESET_FAREWELL_MAX_CHARS` | Cap on the `@reset` farewell sentence (default 200) |
 
-## signal-cli version pin (temporary — read before deploying)
+## signal-cli version pin
 
 The `signal-cli-rest-api` service is **not** the stock published image. It is built
 from [`signal-bridge.Dockerfile`](signal-bridge.Dockerfile), which layers a pinned
-`signal-cli` over the upstream image. This works around two upstream bugs:
+`signal-cli` (the official **0.14.5** release tarball, fetched by checksum) over the
+upstream image. The upstream rest-api image lags `signal-cli` releases, and 0.14.5
+is the first release with the `serverGuid` fix:
 
-- **0.14.4 startup crash** on Java 25 (`verboseLevel is null`), fixed in 0.14.4.1.
 - **Dropped incoming messages** (`getServerGuid(...) must not be null`): from
   ~2026-06-10 the Signal server stopped sending `serverGuid` on sealed-sender
   envelopes, and `signal-cli`'s non-null assertion silently dropped **every**
   incoming message (group + most 1:1). Sending was unaffected, which made it look
-  like a config/membership problem — it wasn't. This hit every released version
-  (0.14.2–0.14.4.1); downgrading does **not** help (the trigger is server-side).
+  like a config/membership problem — it wasn't. This hit every release through
+  0.14.4.1 and was fixed in **0.14.5**.
   See [signal-cli#2059](https://github.com/AsamK/signal-cli/issues/2059) /
   [signal-cli-rest-api#860](https://github.com/bbernhard/signal-cli-rest-api/issues/860).
 
-The fix landed in `signal-cli` master before a release was cut, so the Dockerfile
-uses a **CI snapshot** (`0.14.5-SNAPSHOT`) shipped as a tarball in `vendor/`
-(git-ignored, not committed). Fetch it once with the GitHub CLI:
-
-```bash
-mkdir -p vendor && cd vendor
-# run 27307093674 = master @ b3c1b6a, the serverGuid fix (CI artifacts expire ~90d;
-# grab a newer master run from https://github.com/AsamK/signal-cli/actions if gone)
-gh run download 27307093674 --repo AsamK/signal-cli -n signal-cli-archive-25 --dir _dl
-mv _dl/signal-cli-0.14.5-SNAPSHOT.tar.gz . && rm -rf _dl
-cd ..
-```
-
-> **When `signal-cli` 0.14.5 (or later) is officially released:** switch
-> `signal-bridge.Dockerfile` back to fetching the release tarball from GitHub
-> releases (see git history for the `curl`-based variant), delete `vendor/`, and
-> rebuild. The pin exists only until a fixed release is published.
+To bump the pin, change `SIGNAL_CLI_VERSION` and `SIGNAL_CLI_SHA256` in
+`signal-bridge.Dockerfile` (get the hash with `curl -fsSL <url> | sha256sum`).
+There is no vendored artifact, so CI builds the bridge image from a clean checkout.
 
 ## Deploy (Docker Compose on a droplet)
 
@@ -204,9 +191,13 @@ cd ..
 ```bash
 git clone <this repo> && cd signal-chatbot
 cp .env.example .env   # edit it: API key, BOT_NUMBER, etc.
-# fetch the vendored signal-cli snapshot first (see "signal-cli version pin" above)
 docker compose up -d --build signal-cli-rest-api
 ```
+
+> **Deploying to a shared host (pull prebuilt images instead of building):** see
+> [`deploy/README.md`](deploy/README.md) — `release.sh` publishes images to GHCR
+> and `update.sh` pulls them, with memory limits suitable for running alongside
+> other stacks.
 
 ### 2. Register the bot's number (one time)
 

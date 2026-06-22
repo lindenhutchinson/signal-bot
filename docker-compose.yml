@@ -1,7 +1,7 @@
 services:
   signal-cli-rest-api:
-    # Built from signal-bridge.Dockerfile to pin signal-cli 0.14.4.1 (the published
-    # image still ships 0.14.3, which has a receive bug for new contacts).
+    # Built from signal-bridge.Dockerfile to pin signal-cli 0.14.5 (the upstream
+    # image lags; 0.14.5 is the first release with the serverGuid receive fix).
     build:
       context: .
       dockerfile: signal-bridge.Dockerfile
