@@ -49,7 +49,10 @@ if [[ -n "$latest" ]]; then
 else
 	range="HEAD"
 fi
-notes="$(git log "$range" --no-merges --pretty=format:'- %s (%h)')"
+# Wrap @-tokens in backticks so GitHub doesn't turn commit-message references to
+# the bot's @commands (@reset, @lobotomy, …) into @mentions of real GitHub users.
+notes="$(git log "$range" --no-merges --pretty=format:'- %s (%h)' \
+	| sed -E 's/(^|[^`A-Za-z0-9_])@([A-Za-z0-9_-]+)/\1`@\2`/g')"
 [[ -z "$notes" ]] && notes="- No changes since ${latest:-the beginning}."
 
 echo "==> Releasing $tag (previous: ${latest:-none}) at $(git rev-parse --short HEAD)"
