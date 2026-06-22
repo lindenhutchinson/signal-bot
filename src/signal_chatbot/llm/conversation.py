@@ -105,7 +105,7 @@ class Conversation:
             if armed or attempted:
                 confirm = _confirm_kill_args(choice)
                 if confirm is not None:
-                    return self._deliver_confirm(confirm, used, announcements)
+                    return self._deliver_confirm(confirm, used, announcements, attempted)
 
             final = _final_answer_args(choice)
             if final is not None:
@@ -147,14 +147,23 @@ class Conversation:
         )
 
     def _deliver_confirm(
-        self, confirm: dict, used: list[tuple[str, dict]], announcements: list[str]
+        self,
+        confirm: dict,
+        used: list[tuple[str, dict]],
+        announcements: list[str],
+        attempted: bool = False,
     ) -> BotReply:
         """Build the terminal reply for a ``confirm_kill_self`` call: final words plus the
-        ``self_lobotomy`` flag that tells the caller to wipe the bot."""
+        ``self_lobotomy`` flag that tells the caller to wipe the bot.
+
+        ``attempted`` carries through when the bot attempted AND confirmed in the SAME turn,
+        so the caller can still surface the "attempted to kill itself" announcement before
+        the death notice."""
         return BotReply(
             messages=_messages(confirm.get("final_words")),
             tool_footer=_tool_footer(used),
             announcements=announcements,
+            attempted_self_destruct=attempted,
             self_lobotomy=True,
         )
 

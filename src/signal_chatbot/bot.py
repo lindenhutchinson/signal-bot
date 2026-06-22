@@ -365,6 +365,13 @@ class Bot:
             reply = BotReply()
 
         if reply.self_lobotomy:
+            # Same-turn end (attempt AND confirm in one turn): the group never saw the
+            # attempt warning, so send it as its own message before the death notice — the
+            # two-step alarm, just compressed into one turn.
+            if reply.attempted_self_destruct:
+                await self._signal.send(
+                    OutgoingMessage(group_id=group_id, text=self._self_destruct_warning().strip())
+                )
             await self._self_reset(group_id, reply.message, timestamp)
             return
 

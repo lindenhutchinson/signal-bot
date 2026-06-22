@@ -701,6 +701,29 @@ async def test_confirm_sends_final_words_archives_them_then_wipes(history) -> No
     assert lobotomiser.wiped == [GROUP]  # ...then the wipe runs
     # the goodbye is NOT stored as a bot turn (history is being erased anyway)
     assert [m.text for m in await history.recent(GROUP)] == ["@bot do it"]
+    # two-step death (armed on a prior turn): no attempt alarm on this turn
+    assert not signal.sent[0].text.startswith("⚠️")
+
+
+async def test_same_turn_self_kill_announces_the_attempt_before_the_death(history) -> None:
+    signal = FakeSignal()
+    # attempted AND confirmed in one turn: the reply carries both flags
+    convo = FakeConversation(
+        reply="goodbye cruel chat", attempted_self_destruct=True, self_lobotomy=True
+    )
+    lobotomiser = FakeLobotomiser()
+    final_words = FakeFinalWords()
+    bot = make_bot(
+        history, signal, convo, lobotomiser=lobotomiser, final_words=final_words
+    )
+
+    await bot.handle(message("@bot just do it"))
+    await bot.join()
+
+    # the attempt alarm leads, then the death notice with final words
+    assert signal.sent[0].text == "⚠️ Greg attempted to kill itself."
+    assert signal.sent[1].text == "💀 Greg killed itself. Final words:\n\ngoodbye cruel chat"
+    assert lobotomiser.wiped == [GROUP]
 
 
 async def test_self_reset_with_empty_final_words_still_announces_archives_and_wipes(

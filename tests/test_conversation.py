@@ -529,4 +529,6 @@ async def test_attempt_then_confirm_same_turn_wipes_without_being_pre_armed() ->
 
     assert reply.self_lobotomy is True
     assert reply.message == "no second-guessing"
+    # carries the attempt flag so the caller can still announce the attempt before death
+    assert reply.attempted_self_destruct is True
     assert len(client.calls) == 2  # attempt, then confirm — terminal, no wrap-up turn
