@@ -31,7 +31,12 @@ services:
       # json-rpc mode keeps a persistent connection and serves the receive websocket.
       MODE: json-rpc
     volumes:
-      - ./signal-cli-config:/home/.local/share/signal-cli
+      # Named volume, NOT a host bind mount: signal-cli runs as uid 1000 and must
+      # WRITE its account store (receive, WAL checkpoints). On macOS/Colima a bind
+      # mount maps files to root and ignores chown, so uid 1000 can't write. A
+      # named volume lives in the VM with native Linux ownership. To migrate an
+      # existing account in, seed the volume (see deploy/README.md "Migrating").
+      - signal-cli-config:/home/.local/share/signal-cli
     ports:
       # Loopback only, for one-time registration from the host. Comment out once
       # the bot is registered and joined — nothing needs to reach the bridge then.
@@ -55,3 +60,7 @@ services:
       - ./data:/app/data
       - ./prompts:/app/prompts:ro
     mem_limit: ${MEM_BOT:-320m}
+
+volumes:
+  # signal-cli account store (registration keys, group/contact state, message db).
+  signal-cli-config:
