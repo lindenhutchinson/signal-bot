@@ -16,6 +16,7 @@ from signal_chatbot.llm.control import (
     ATTEMPT_KILL_NAME,
     CONFIRM_KILL_NAME,
     FINAL_ANSWER_NAME,
+    _budget_message,
     _called,
     _confirm_kill_args,
     _final_answer_args,
@@ -83,18 +84,22 @@ class Conversation:
         ``self_lobotomy=True`` with the model's final words for the caller to act on.
         """
         working = list(messages)
-        tool_defs = self._tools.definitions() + [_FINAL_ANSWER_DEF, _ATTEMPT_KILL_DEF]
-        # confirm_kill_self is offered once the bot is armed — either from a PRIOR turn's
-        # attempt (the persisted ``armed`` flag) or the moment it attempts THIS turn, so it
-        # can go through with it in the same breath. Once added it stays for the rest of the
-        # loop; the model decides whether to use it now or wait.
+        registry_defs = self._tools.definitions()
+        # Control tools always stay offered, never budgeted. confirm_kill_self is added once
+        # the bot is armed — either from a PRIOR turn's attempt (the persisted ``armed`` flag)
+        # or the moment it attempts THIS turn, so it can go through in the same breath.
+        control_defs = [_FINAL_ANSWER_DEF, _ATTEMPT_KILL_DEF]
         if armed:
-            tool_defs.append(_CONFIRM_KILL_DEF)
+            control_defs = control_defs + [_CONFIRM_KILL_DEF]
         used: list[tuple[str, dict]] = []
         announcements: list[str] = []
+        # Per-turn dispatch counts, so a tool can be withdrawn once it hits its per_turn_limit.
+        counts: dict[str, int] = {}
         attempted = False
 
         for _ in range(self._max_iterations):
+            # Offer only tools that still have budget left this turn (plus the control tools).
+            tool_defs = self._offered(registry_defs, counts) + control_defs
             completion = await self._client.complete(working, tools=tool_defs)
             self._log_cache_usage(completion)
             choice = completion.choices[0].message
@@ -104,8 +109,8 @@ class Conversation:
                 # Offer confirm for the rest of the loop. Rebind to a new list rather than
                 # mutating in place, so the tool set already sent on earlier iterations is
                 # left as it was.
-                if _CONFIRM_KILL_DEF not in tool_defs:
-                    tool_defs = tool_defs + [_CONFIRM_KILL_DEF]
+                if _CONFIRM_KILL_DEF not in control_defs:
+                    control_defs = control_defs + [_CONFIRM_KILL_DEF]
 
             # Confirm is honoured whenever it's available (armed coming in, or attempted this
             # turn) — including in the SAME completion that attempted, if the model calls both.
@@ -140,9 +145,18 @@ class Conversation:
                     )
                 return await self._force_final(working, used, announcements, attempted)
 
-            await self._record_tool_turn(working, choice, ctx, used, announcements)
+            await self._record_tool_turn(working, choice, ctx, used, announcements, counts)
 
         return await self._force_final(working, used, announcements, attempted)
+
+    def _offered(self, registry_defs: list[dict], counts: dict[str, int]) -> list[dict]:
+        """The registry tool defs still available this turn — those under their per_turn_limit."""
+        return [d for d in registry_defs if not self._exhausted(d["function"]["name"], counts)]
+
+    def _exhausted(self, name: str, counts: dict[str, int]) -> bool:
+        """Whether ``name`` has hit its per-turn budget."""
+        limit = self._tools.per_turn_limit(name)
+        return limit is not None and counts.get(name, 0) >= limit
 
     def _deliver(
         self,
@@ -213,6 +227,7 @@ class Conversation:
         ctx: ToolContext,
         used: list[tuple[str, dict]],
         announcements: list[str],
+        counts: dict[str, int],
     ) -> None:
         """Append the assistant's tool-call turn and each tool's result to ``working``.
 
@@ -220,7 +235,9 @@ class Conversation:
         outcomes' announcements accumulate into ``announcements``. ``attempt_kill_self``
         is answered with the revelation result and deliberately kept OUT of ``used`` so it
         never leaks into the public tool-usage footer; ``hidden`` tools (the secret
-        takeover) are likewise excluded from ``used`` but still run.
+        takeover) are likewise excluded from ``used`` but still run. A call to a tool that
+        has already hit its per-turn budget (``counts``) is refused without running — the
+        guard against a model that spams the same tool within one completion.
         """
         working.append(self._assistant_turn(choice))
         for call in choice.tool_calls:
@@ -234,6 +251,10 @@ class Conversation:
                 # it delivers on a later turn, AFTER reading the tool results recorded here.
                 working.append(self._tool_result(call.id, _ANSWER_AFTER_TOOLS))
                 continue
+            if self._exhausted(name, counts):
+                working.append(self._tool_result(call.id, _budget_message(name)))
+                continue
+            counts[name] = counts.get(name, 0) + 1
             if not self._tools.is_hidden(name):
                 used.append((name, _parse_args(call.function.arguments)))
             working.append(await self._run_tool(call, ctx, announcements))

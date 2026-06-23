@@ -81,6 +81,7 @@ async def _run() -> None:
                 result_limit=settings.websearch_result_limit,
             ),
             snippet_max_chars=settings.websearch_snippet_max_chars,
+            per_turn_limit=settings.websearch_per_turn_limit,
         )
     log.info("websearch.configured", enabled=web_search is not None)
     # One flag facade over the generic flag store, shared by the bot (arming, listen),

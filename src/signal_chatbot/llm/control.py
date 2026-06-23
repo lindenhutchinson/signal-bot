@@ -134,6 +134,18 @@ _ANSWER_AFTER_TOOLS = (
 )
 
 
+def _budget_message(name: str) -> str:
+    """Fed back when the model calls a tool it has already used its per-turn allotment of.
+
+    The tool has been withdrawn from its options; this tells it to stop and answer rather
+    than keep trying — the structural counterpart to a model that ignores "use it sparingly"."""
+    return (
+        f"(System: you've already used {name} as many times as allowed this turn, so it was "
+        "NOT run again and is no longer available. Stop calling it — use what you have and "
+        "deliver your reply.)"
+    )
+
+
 def _parse_args(raw: str | None) -> dict:
     """Parse a tool call's JSON arguments, tolerating malformed input."""
     try:

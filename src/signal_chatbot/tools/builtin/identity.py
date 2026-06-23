@@ -24,6 +24,7 @@ class SetName(Tool):
         "this once every few minutes, so pick a name you mean to keep; don't rename on a whim."
     )
     summary = "Change its own display name."
+    per_turn_limit = 1
 
     class Args(BaseModel):
         name: str = Field(description="Your new display name, e.g. 'Greg'. Keep it short.")

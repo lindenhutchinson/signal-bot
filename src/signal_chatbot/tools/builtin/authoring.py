@@ -67,9 +67,11 @@ class AddRule(_AddDirective):
     description = (
         "Permanently add a HARD RULE to your own directives for this group — a binding "
         "constraint you will follow from now on. Everyone sees it announced. Use it "
-        "deliberately and rarely; it cannot be undone except by a reset."
+        "deliberately and rarely; it cannot be undone except by a reset. At most one new "
+        "rule per reply."
     )
     summary = "Give itself a new hard rule."
+    per_turn_limit = 1
     _kind = "rule"
     _announcement = '⚖️ {name} added a rule: "{text}"'
 
@@ -79,8 +81,10 @@ class AddLore(_AddDirective):
     description = (
         "Permanently add a piece of LORE to your own directives for this group — a fact or "
         "bit of history that will be treated as true from now on. Everyone sees it "
-        "announced. Use it deliberately; it cannot be undone except by a reset."
+        "announced. Use it deliberately; it cannot be undone except by a reset. At most one "
+        "new piece of lore per reply."
     )
     summary = "Add to its own backstory/lore."
+    per_turn_limit = 1
     _kind = "lore"
     _announcement = '📜 {name} added lore: "{text}"'

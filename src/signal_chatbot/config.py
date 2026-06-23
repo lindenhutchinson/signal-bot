@@ -50,7 +50,9 @@ class Settings(BaseSettings):
     system_prompt_path: Path = Path("prompts/identity.md")
     history_window_max: int = 40
     database_path: Path = Path("data/history.sqlite")
-    max_tool_iterations: int = 25
+    # Hard ceiling on the model's tool loop per reply. Kept low: per-tool budgets
+    # (Tool.per_turn_limit) curb most flailing; this just bounds the worst case.
+    max_tool_iterations: int = 8
     command_log_window: int = 40
     # Minimum gap between the bot renaming itself via the set_name tool. Cleared by any
     # slate wipe (@reset/@lobotomy/self-kill) so a fresh incarnation can name itself at once.
@@ -72,6 +74,9 @@ class Settings(BaseSettings):
     tavily_api_key: str = ""  # empty = web search disabled
     websearch_result_limit: int = 5
     websearch_snippet_max_chars: int = 500
+    # Max web searches the model may run in a single reply, to stop it flailing on
+    # near-identical queries when it can't find what it wants.
+    websearch_per_turn_limit: int = 4
 
     @field_validator("allowed_group_ids", "allowed_senders", mode="before")
     @classmethod

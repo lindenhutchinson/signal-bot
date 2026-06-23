@@ -58,12 +58,18 @@ class Tool(ABC):
     ``hidden`` tools are still offered to the model but are kept out of the
     human-facing ``@info`` list and the public tool-usage footer — for a secret
     tool the group is never meant to learn the bot has.
+
+    ``per_turn_limit`` caps how many times the tool may run within a single reply.
+    ``None`` means unlimited; a number withdraws the tool from the model's options
+    once it has been used that many times this turn — a structural brake on a model
+    that would otherwise spam an action (re-adding the same rule, flailing on search).
     """
 
     name: str
     description: str
     summary: str
     hidden: bool = False
+    per_turn_limit: int | None = None
 
     class Args(BaseModel):
         """Override with the tool's parameters. Defaults to no arguments."""

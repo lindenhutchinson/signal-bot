@@ -22,6 +22,7 @@ class WikipediaSearch(Tool):
         "'Mercury' the planet vs the element), then read it with wikipedia_article."
     )
     summary = "Search Wikipedia."
+    per_turn_limit = 3
 
     class Args(BaseModel):
         query: str = Field(description="What to search for, e.g. 'James Webb telescope'.")
@@ -44,6 +45,7 @@ class WikipediaArticle(Tool):
         "article's sections, then pass a section name or number to read that section."
     )
     summary = "Read a Wikipedia article."
+    per_turn_limit = 4
 
     class Args(BaseModel):
         title: str = Field(description="Exact article title, e.g. 'Mercury (planet)'.")

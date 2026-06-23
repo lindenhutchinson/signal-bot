@@ -17,6 +17,7 @@ class CurrentTime(Tool):
     name = "current_time"
     description = "Get the current date and time, optionally in a given IANA timezone."
     summary = "Check the current date and time."
+    per_turn_limit = 1
 
     class Args(BaseModel):
         timezone: str = Field(

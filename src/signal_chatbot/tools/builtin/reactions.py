@@ -23,6 +23,7 @@ class SendReaction(Tool):
         "as your reply: you still speak via final_answer."
     )
     summary = "React to a message with an emoji."
+    per_turn_limit = 1
 
     class Args(BaseModel):
         emoji: str = Field(description="A single emoji to react with, e.g. '😂' or '🔥'.")

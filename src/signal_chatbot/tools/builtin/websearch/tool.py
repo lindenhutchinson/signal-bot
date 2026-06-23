@@ -27,16 +27,19 @@ class WebSearch(Tool):
         "Search the public web and get a list of result titles, URLs, and short "
         "snippets. Use this for current events, recent facts, or anything not covered "
         "by Wikipedia. Results are brief external snippets, not full pages — synthesise "
-        "an answer from several of them rather than trusting any single one blindly."
+        "an answer from several of them rather than trusting any single one blindly. If "
+        "the first one or two searches don't surface it, the web likely doesn't have it "
+        "handy — say what you found (or couldn't) instead of re-searching the same thing."
     )
     summary = "Search the web."
 
     class Args(BaseModel):
         query: str = Field(description="What to search the web for, e.g. 'latest Mars rover news'.")
 
-    def __init__(self, client: TavilyClient, *, snippet_max_chars: int):
+    def __init__(self, client: TavilyClient, *, snippet_max_chars: int, per_turn_limit: int):
         self._client = client
         self._snippet_max_chars = snippet_max_chars
+        self.per_turn_limit = per_turn_limit
 
     async def run(self, args: WebSearch.Args, ctx: ToolContext) -> str:
         hits = await self._client.search(args.query)

@@ -429,6 +429,68 @@ async def test_tool_footer_singular_and_dedupes() -> None:
     assert reply.tool_footer == "\n\nlooked up 1 article:\n- Mercury (planet)"
 
 
+class Limited(Tool):
+    name = "limited"
+    description = "A tool that may only be used once per turn."
+    per_turn_limit = 1
+
+    def __init__(self) -> None:
+        self.runs = 0
+
+    async def run(self, args: "Limited.Args", ctx: ToolContext) -> str:
+        self.runs += 1
+        return f"ran {self.runs}"
+
+
+def test_registry_exposes_per_turn_limit() -> None:
+    assert ToolRegistry([Limited()]).per_turn_limit("limited") == 1
+    assert ToolRegistry([Echo()]).per_turn_limit("echo") is None
+    assert ToolRegistry([]).per_turn_limit("nope") is None
+
+
+async def test_limited_tool_is_withdrawn_after_its_budget_is_spent() -> None:
+    tool = Limited()
+    client = FakeClient(
+        [
+            _completion(_message(tool_calls=[_tool_call("c1", "limited", {})])),
+            _final("done"),
+        ]
+    )
+    convo = Conversation(client, ToolRegistry([tool]), max_iterations=3)
+
+    await convo.respond([{"role": "user", "content": "x"}], CTX)
+
+    # offered on the first completion, withdrawn from the second once used up
+    assert "limited" in [t["function"]["name"] for t in client.calls[0][1]]
+    assert "limited" not in [t["function"]["name"] for t in client.calls[1][1]]
+    assert tool.runs == 1
+
+
+async def test_over_budget_call_in_one_completion_is_rejected_not_run() -> None:
+    tool = Limited()
+    client = FakeClient(
+        [
+            _completion(
+                _message(
+                    tool_calls=[
+                        _tool_call("a", "limited", {}),
+                        _tool_call("b", "limited", {}),  # second call, over budget
+                    ]
+                )
+            ),
+            _final("done"),
+        ]
+    )
+    convo = Conversation(client, ToolRegistry([tool]), max_iterations=3)
+
+    await convo.respond([{"role": "user", "content": "x"}], CTX)
+
+    assert tool.runs == 1  # the second call never executed
+    # both tool calls still got a tool result fed back (the API requires one per call)
+    tool_results = [m for m in client.calls[1][0] if m.get("role") == "tool"]
+    assert len(tool_results) == 2
+
+
 def test_footer_shows_web_searches() -> None:
     used = [("web_search", {"query": "mars rover news"})]
     assert _tool_footer(used) == "\n\nsearched the web for 1 thing:\n- mars rover news"

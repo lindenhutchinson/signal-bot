@@ -22,6 +22,7 @@ class RememberAboutUser(Tool):
         "is NOT announced to the group, only kept in your own memory."
     )
     summary = "Remember a fact about someone."
+    per_turn_limit = 2
 
     class Args(BaseModel):
         about: str = Field(description="The person's name, exactly as it appears in chat.")

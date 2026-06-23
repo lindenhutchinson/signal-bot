@@ -13,7 +13,7 @@ class FakeClient:
 
 
 def _tool(hits: list[SearchHit], *, snippet_max_chars: int = 500) -> WebSearch:
-    return WebSearch(FakeClient(hits), snippet_max_chars=snippet_max_chars)
+    return WebSearch(FakeClient(hits), snippet_max_chars=snippet_max_chars, per_turn_limit=4)
 
 
 async def test_run_formats_hits_with_untrusted_framing() -> None:

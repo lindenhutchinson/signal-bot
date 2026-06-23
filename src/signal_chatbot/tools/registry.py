@@ -45,6 +45,11 @@ class ToolRegistry:
         tool = self._tools.get(name)
         return tool is not None and tool.hidden
 
+    def per_turn_limit(self, name: str) -> int | None:
+        """How many times the named tool may run per turn (``None`` = unlimited)."""
+        tool = self._tools.get(name)
+        return None if tool is None else tool.per_turn_limit
+
     @property
     def is_empty(self) -> bool:
         return not self._tools
