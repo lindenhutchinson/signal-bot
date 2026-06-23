@@ -35,7 +35,9 @@ def _build(directives, **kw):
         None,  # flags
         None,  # reactions
         None,  # wikipedia
+        None,  # cooldowns (set_name not dispatched here — only names are inspected)
         wikipedia_max_section_chars=100,
+        set_name_cooldown_ms=300_000,
         **kw,
     )  # type: ignore[arg-type]
 

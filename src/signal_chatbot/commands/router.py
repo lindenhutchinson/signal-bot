@@ -16,6 +16,7 @@ from signal_chatbot.history import HistoryStore
 from signal_chatbot.lobotomy import Lobotomiser
 from signal_chatbot.logging import get_logger
 from signal_chatbot.state.commands import CommandLog
+from signal_chatbot.state.cooldowns import CooldownStore
 from signal_chatbot.state.directives import DirectiveStore
 from signal_chatbot.state.disclaimers import DisclaimerStore
 from signal_chatbot.state.finalwords import FinalWordsStore
@@ -41,6 +42,7 @@ class CommandRouter:
         flags: FlagRegistry,
         final_words: FinalWordsStore,
         history: HistoryStore,
+        cooldowns: CooldownStore,
         farewell: FarewellWriter,
         name_setter: ProfileNameSetter,
         lobotomiser: Lobotomiser,
@@ -54,6 +56,7 @@ class CommandRouter:
         self._flags = flags
         self._final_words = final_words
         self._history = history
+        self._cooldowns = cooldowns
         self._farewell = farewell
         self._name_setter = name_setter
         self._lobotomiser = lobotomiser
@@ -165,9 +168,9 @@ class CommandRouter:
         return reply
 
     async def _reset(self, message: IncomingMessage) -> str:
-        """Soft wipe: farewell, then clear directives, history, disclaimers, profiles and
-        every flag, and rename the bot to the persona it became. The farewell is recorded
-        to the final-words archive (which survives the wipe), not seeded back as lore."""
+        """Soft wipe: farewell, then clear directives, history, disclaimers, profiles,
+        every flag and cooldown, and rename the bot to the persona it became. The farewell
+        is recorded to the final-words archive (which survives the wipe), not seeded back."""
         directives = await self._directives.directives(message.group_id)
         history = await self._history.recent(message.group_id)
         farewell = await self._farewell.write(directives=directives, history=history)
@@ -176,6 +179,7 @@ class CommandRouter:
         await self._disclaimers.clear(message.group_id)
         await self._profiles.clear(message.group_id)
         await self._flags.clear(message.group_id)
+        await self._cooldowns.clear(message.group_id)
         await self._log(message, CommandName.RESET)
         if farewell is None:
             return replies.RESET_CLEAN

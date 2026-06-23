@@ -10,7 +10,7 @@ from signal_chatbot.llm.control import (
     FINAL_ANSWER_NAME,
 )
 from signal_chatbot.llm.conversation import Conversation
-from signal_chatbot.llm.parsing import _strip_tool_markup
+from signal_chatbot.llm.parsing import _strip_tool_markup, _tool_footer
 from signal_chatbot.tools import Tool, ToolContext, ToolOutcome, ToolRegistry
 
 CTX = ToolContext(group_id="g1", timestamp=1)
@@ -231,45 +231,57 @@ async def test_info_tool_then_final_answer() -> None:
     assert tool_msg["content"] == "echoed:yo"
 
 
-async def test_final_answer_alongside_info_tool_is_terminal() -> None:
-    # If the model calls final_answer (even next to an info tool), that's the reply.
-    both = _completion(
-        _message(
-            tool_calls=[
-                _tool_call("c1", "echo", {"text": "yo"}),
-                _tool_call("f1", FINAL_ANSWER_NAME, {"messages": ["done now"]}),
-            ]
-        )
+async def test_final_answer_alongside_a_tool_defers_until_the_tool_runs() -> None:
+    # final_answer called in the SAME completion as another tool must NOT win: the tool
+    # runs first, and the model delivers on a later turn once it has seen the result.
+    client = FakeClient(
+        [
+            _completion(
+                _message(
+                    tool_calls=[
+                        _tool_call("c1", "echo", {"text": "yo"}),
+                        _tool_call("f1", FINAL_ANSWER_NAME, {"messages": ["premature"]}),
+                    ]
+                )
+            ),
+            _final("the real answer"),
+        ]
     )
-    client = FakeClient([both])
     convo = Conversation(client, ToolRegistry([Echo()]), max_iterations=3)
 
     reply = await convo.respond([{"role": "user", "content": "x"}], CTX)
 
-    assert reply.message == "done now"
-    assert len(client.calls) == 1
+    assert reply.message == "the real answer"  # NOT the premature one
+    # echo actually ran — its result was fed back before the delivering turn
+    assert any(
+        m.get("role") == "tool" and m.get("content") == "echoed:yo" for m in client.calls[1][0]
+    )
+    assert len(client.calls) == 2  # deferred, not terminal
 
 
 async def test_action_tool_called_with_final_answer_still_runs() -> None:
     # The model emits an ACTION tool (announce — stands in for add_rule/set_name) AND
     # final_answer in ONE completion. The action must still run and its announcement ride
-    # out — not be silently dropped while the message claims it happened.
-    both = _completion(
-        _message(
-            tool_calls=[
-                _tool_call("a1", "announce", {"text": "a rule"}),
-                _tool_call("f1", FINAL_ANSWER_NAME, {"messages": ["done"]}),
-            ]
-        )
+    # out on the reply the model delivers once it has seen the action's result.
+    client = FakeClient(
+        [
+            _completion(
+                _message(
+                    tool_calls=[
+                        _tool_call("a1", "announce", {"text": "a rule"}),
+                        _tool_call("f1", FINAL_ANSWER_NAME, {"messages": ["premature"]}),
+                    ]
+                )
+            ),
+            _final("done"),
+        ]
     )
-    client = FakeClient([both])
     convo = Conversation(client, ToolRegistry([Announcer()]), max_iterations=3)
 
     reply = await convo.respond([{"role": "user", "content": "x"}], CTX)
 
     assert reply.message == "done"
     assert reply.announcements == ["📢 a rule"]
-    assert len(client.calls) == 1  # still terminal — no extra completion
 
 
 def test_strip_tool_markup_removes_leaked_dsml() -> None:
@@ -415,6 +427,21 @@ async def test_tool_footer_singular_and_dedupes() -> None:
     reply = await convo.respond([{"role": "user", "content": "x"}], CTX)
 
     assert reply.tool_footer == "\n\nlooked up 1 article:\n- Mercury (planet)"
+
+
+def test_footer_shows_web_searches() -> None:
+    used = [("web_search", {"query": "mars rover news"})]
+    assert _tool_footer(used) == "\n\nsearched the web for 1 thing:\n- mars rover news"
+
+
+def test_footer_shows_web_and_wikipedia_searches_together() -> None:
+    used = [
+        ("wikipedia_article", {"title": "Mars"}),
+        ("web_search", {"query": "mars rover news"}),
+    ]
+    footer = _tool_footer(used)
+    assert "looked up 1 article:\n- Mars" in footer
+    assert "searched the web for 1 thing:\n- mars rover news" in footer
 
 
 async def test_final_answer_is_offered_and_no_json_mode_is_used() -> None:

@@ -94,7 +94,9 @@ async def _run() -> None:
             flags,
             signal,
             wikipedia,
+            db.cooldowns,
             wikipedia_max_section_chars=settings.wikipedia_max_section_chars,
+            set_name_cooldown_ms=settings.set_name_cooldown_seconds * 1000,
             web_search=web_search,
         )
     )
@@ -109,6 +111,7 @@ async def _run() -> None:
         disclaimers=db.disclaimers,
         profiles=db.profiles,
         history=history,
+        cooldowns=db.cooldowns,
         name_setter=bot_name,
         default_name=settings.default_display_name,
     )
@@ -120,6 +123,7 @@ async def _run() -> None:
         flags=flags,
         final_words=db.final_words,
         history=history,
+        cooldowns=db.cooldowns,
         farewell=LlmFarewellWriter(llm, max_chars=settings.reset_farewell_max_chars),
         name_setter=bot_name,
         lobotomiser=lobotomiser,

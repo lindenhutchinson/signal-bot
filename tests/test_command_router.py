@@ -67,6 +67,7 @@ def router(
         disclaimers=db.disclaimers,
         profiles=db.profiles,
         history=history,
+        cooldowns=db.cooldowns,
         name_setter=setter,
         default_name=default_name,
     )
@@ -78,6 +79,7 @@ def router(
         flags=flags,
         final_words=db.final_words,
         history=history,
+        cooldowns=db.cooldowns,
         farewell=farewell or FakeFarewellWriter(None),
         name_setter=setter,
         lobotomiser=lobotomiser,

@@ -86,6 +86,38 @@ async def test_clear_directives_removes_only_the_target_group(db: Database) -> N
     assert [d.text for d in (await store.directives("g2")).rules] == ["y"]
 
 
+# --- cooldowns -------------------------------------------------------------
+
+
+async def test_cooldown_is_unset_until_marked(db: Database) -> None:
+    assert await db.cooldowns.last_at("g1", "set_name") is None
+
+
+async def test_cooldown_mark_then_read_roundtrips(db: Database) -> None:
+    await db.cooldowns.mark("g1", "set_name", at=1000)
+    assert await db.cooldowns.last_at("g1", "set_name") == 1000
+
+
+async def test_cooldown_mark_overwrites_the_previous_time(db: Database) -> None:
+    await db.cooldowns.mark("g1", "set_name", at=1000)
+    await db.cooldowns.mark("g1", "set_name", at=2500)
+    assert await db.cooldowns.last_at("g1", "set_name") == 2500
+
+
+async def test_cooldowns_are_isolated_per_group_and_name(db: Database) -> None:
+    await db.cooldowns.mark("g1", "set_name", at=1000)
+    assert await db.cooldowns.last_at("g2", "set_name") is None
+    assert await db.cooldowns.last_at("g1", "other") is None
+
+
+async def test_clear_cooldowns_removes_only_the_target_group(db: Database) -> None:
+    await db.cooldowns.mark("g1", "set_name", at=1000)
+    await db.cooldowns.mark("g2", "set_name", at=1000)
+    await db.cooldowns.clear("g1")
+    assert await db.cooldowns.last_at("g1", "set_name") is None
+    assert await db.cooldowns.last_at("g2", "set_name") == 1000
+
+
 # --- command log ----------------------------------------------------------
 
 

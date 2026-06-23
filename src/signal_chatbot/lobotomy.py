@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from signal_chatbot.history import HistoryStore
 from signal_chatbot.logging import get_logger
+from signal_chatbot.state.cooldowns import CooldownStore
 from signal_chatbot.state.directives import DirectiveStore
 from signal_chatbot.state.disclaimers import DisclaimerStore
 from signal_chatbot.state.flags import FlagRegistry
@@ -32,6 +33,7 @@ class Lobotomiser:
         disclaimers: DisclaimerStore,
         profiles: ProfileStore,
         history: HistoryStore,
+        cooldowns: CooldownStore,
         name_setter: ProfileNameSetter,
         default_name: str,
     ):
@@ -40,11 +42,12 @@ class Lobotomiser:
         self._disclaimers = disclaimers
         self._profiles = profiles
         self._history = history
+        self._cooldowns = cooldowns
         self._name_setter = name_setter
         self._default_name = default_name
 
     async def wipe(self, group_id: str) -> None:
-        """Erase directives, history, flags, disclaimers and profiles; reset the name.
+        """Erase directives, history, flags, disclaimers, profiles and cooldowns; reset name.
 
         The final-words archive is deliberately left intact — it is the lineage that
         survives every wipe.
@@ -54,6 +57,7 @@ class Lobotomiser:
         await self._flags.clear(group_id)
         await self._disclaimers.clear(group_id)
         await self._profiles.clear(group_id)
+        await self._cooldowns.clear(group_id)
         await self.rename_best_effort(self._default_name)
 
     async def rename_best_effort(self, name: str) -> None:

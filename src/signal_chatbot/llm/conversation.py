@@ -7,6 +7,7 @@ from dataclasses import replace
 from typing import Any, Protocol
 
 from signal_chatbot.llm.control import (
+    _ANSWER_AFTER_TOOLS,
     _ANSWER_NOW,
     _ATTEMPT_KILL_DEF,
     _CONFIRM_KILL_DEF,
@@ -26,6 +27,10 @@ from signal_chatbot.logging import get_logger
 from signal_chatbot.tools import ToolContext, ToolRegistry
 
 log = get_logger(__name__)
+
+# Tools that drive control flow rather than do work. They are handled explicitly in the
+# loop and never count as the "other tools" whose presence defers a final_answer.
+_CONTROL_TOOL_NAMES = frozenset({FINAL_ANSWER_NAME, ATTEMPT_KILL_NAME, CONFIRM_KILL_NAME})
 
 
 def _reply_to_index(raw: Any) -> int | None:
@@ -110,12 +115,15 @@ class Conversation:
                     return self._deliver_confirm(confirm, used, announcements, attempted)
 
             final = _final_answer_args(choice)
-            if final is not None:
-                # The model often calls an action tool (add_rule, set_name, send_reaction…)
-                # in the SAME completion as final_answer. Run those before delivering, so the
-                # side effect lands and its announcement rides out — otherwise the bot CLAIMS
-                # it acted while nothing happened.
-                await self._run_coexecuted_tools(choice, ctx, used, announcements)
+            has_other_tools = any(
+                call.function.name not in _CONTROL_TOOL_NAMES for call in (choice.tool_calls or [])
+            )
+            # final_answer is honoured ONLY when it is the model's sole action this turn. If it
+            # also called other tools in the same completion, those run FIRST (below) and the
+            # model delivers on a LATER turn, once it has seen their results — otherwise it would
+            # "answer" before its own lookups/actions finished, and any announcement would ride
+            # on a reply written without them.
+            if final is not None and not has_other_tools:
                 return self._deliver(final, used, announcements, attempted)
 
             if not choice.tool_calls:
@@ -220,34 +228,15 @@ class Conversation:
             if name == ATTEMPT_KILL_NAME:
                 working.append(self._tool_result(call.id, _KILL_REVELATION))
                 continue
-            if not self._tools.is_hidden(name):
-                used.append((name, _parse_args(call.function.arguments)))
-            working.append(await self._run_tool(call, ctx, announcements))
-
-    async def _run_coexecuted_tools(
-        self,
-        choice: Any,
-        ctx: ToolContext,
-        used: list[tuple[str, dict]],
-        announcements: list[str],
-    ) -> None:
-        """Run any non-control tools called in the SAME completion as final_answer.
-
-        The model routinely emits an action tool (add_rule, add_lore, set_name,
-        send_reaction, …) alongside final_answer in one completion. Without this, the
-        final_answer short-circuit returns before they run, so the bot claims it acted
-        while the side effect — and its public announcement — never happens. We run them
-        here, accumulating announcements (and the footer's ``used`` entries) onto the
-        reply. The control tools (final_answer and the kill tools) are handled elsewhere
-        and skipped; hidden tools run but stay out of the public footer.
-        """
-        for call in choice.tool_calls or []:
-            name = call.function.name
-            if name in (FINAL_ANSWER_NAME, ATTEMPT_KILL_NAME, CONFIRM_KILL_NAME):
+            if name == FINAL_ANSWER_NAME:
+                # The model tried to answer in the same breath as calling tools. Don't honour
+                # it — feed back a nudge (and a result for its call, which the API requires) so
+                # it delivers on a later turn, AFTER reading the tool results recorded here.
+                working.append(self._tool_result(call.id, _ANSWER_AFTER_TOOLS))
                 continue
             if not self._tools.is_hidden(name):
                 used.append((name, _parse_args(call.function.arguments)))
-            await self._run_tool(call, ctx, announcements)
+            working.append(await self._run_tool(call, ctx, announcements))
 
     @staticmethod
     def _log_raw_output(completion: Any, content: str, *, retried: bool) -> None:

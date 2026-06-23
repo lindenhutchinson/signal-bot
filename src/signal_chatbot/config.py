@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     database_path: Path = Path("data/history.sqlite")
     max_tool_iterations: int = 25
     command_log_window: int = 40
+    # Minimum gap between the bot renaming itself via the set_name tool. Cleared by any
+    # slate wipe (@reset/@lobotomy/self-kill) so a fresh incarnation can name itself at once.
+    set_name_cooldown_seconds: int = 300
     reset_farewell_max_chars: int = 200
     default_display_name: str = "bot"
     # IANA timezone for all human-facing timestamps (summon prompt, command lists).

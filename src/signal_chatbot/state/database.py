@@ -15,6 +15,7 @@ from pathlib import Path
 import aiosqlite
 
 from signal_chatbot.state.commands import CommandLog
+from signal_chatbot.state.cooldowns import CooldownStore
 from signal_chatbot.state.directives import DirectiveStore
 from signal_chatbot.state.disclaimers import DisclaimerStore
 from signal_chatbot.state.finalwords import FinalWordsStore
@@ -35,6 +36,7 @@ class Database:
         self.flags: FlagStore
         self.profiles: ProfileStore
         self.final_words: FinalWordsStore
+        self.cooldowns: CooldownStore
 
     async def connect(self) -> None:
         """Open the database, build the sub-stores, and ensure every schema exists."""
@@ -50,6 +52,7 @@ class Database:
         self.flags = FlagStore(conn)
         self.profiles = ProfileStore(conn)
         self.final_words = FinalWordsStore(conn)
+        self.cooldowns = CooldownStore(conn)
 
         for store in (
             self.directives,
@@ -58,6 +61,7 @@ class Database:
             self.flags,
             self.profiles,
             self.final_words,
+            self.cooldowns,
         ):
             await conn.executescript(store.SCHEMA)
         await conn.commit()

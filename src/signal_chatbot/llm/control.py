@@ -123,6 +123,16 @@ _ANSWER_NOW = (
     "tool with what you already have. Do not search for anything else.)"
 )
 
+# Fed back as the result of a final_answer call that arrived ALONGSIDE other tool calls. The
+# model jumped the gun — answering in the same breath as calling tools. We run the other
+# tools first and tell it to deliver only once it has read their results, so it never answers
+# before its own tools have finished.
+_ANSWER_AFTER_TOOLS = (
+    "(System: you called final_answer in the same step as other tools, so it was NOT sent. "
+    "Those tools have now run — their results are above. Read them, then call final_answer "
+    "again on its own to deliver your reply.)"
+)
+
 
 def _parse_args(raw: str | None) -> dict:
     """Parse a tool call's JSON arguments, tolerating malformed input."""

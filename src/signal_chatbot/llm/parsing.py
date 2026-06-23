@@ -92,19 +92,30 @@ def _dedup(values) -> list[str]:
 def _tool_footer(used: list[tuple[str, dict]]) -> str:
     """Build the "what I looked up" note appended to a reply when tools were used.
 
-    ``used`` is the ordered list of ``(tool_name, arguments)`` invoked this turn.
-    Article reads are the headline; otherwise we fall back to searches, then to a bare
-    list of tool names — so any tool use produces a footer.
+    ``used`` is the ordered list of ``(tool_name, arguments)`` invoked this turn. Each
+    kind of lookup the bot did — Wikipedia article reads, Wikipedia searches, and web
+    searches — gets its own labelled block, so a turn that both reads an article and
+    searches the web shows both. When no lookup happened we fall back to a bare list of
+    tool names, so any tool use still produces a footer.
     """
     if not used:
         return ""
     articles = _dedup(a.get("title", "") for n, a in used if n == "wikipedia_article")
+    wiki_searches = _dedup(a.get("query", "") for n, a in used if n == "wikipedia_search")
+    web_searches = _dedup(a.get("query", "") for n, a in used if n == "web_search")
+
+    blocks: list[str] = []
     if articles:
-        return _footer_block(f"looked up {len(articles)} article{_plural(articles)}:", articles)
-    searches = _dedup(a.get("query", "") for n, a in used if n == "wikipedia_search")
-    if searches:
-        header = f"searched Wikipedia for {len(searches)} thing{_plural(searches)}:"
-        return _footer_block(header, searches)
+        header = f"looked up {len(articles)} article{_plural(articles)}:"
+        blocks.append(_footer_block(header, articles))
+    if wiki_searches:
+        header = f"searched Wikipedia for {len(wiki_searches)} thing{_plural(wiki_searches)}:"
+        blocks.append(_footer_block(header, wiki_searches))
+    if web_searches:
+        header = f"searched the web for {len(web_searches)} thing{_plural(web_searches)}:"
+        blocks.append(_footer_block(header, web_searches))
+    if blocks:
+        return "".join(blocks)
     return _footer_block("used:", _dedup(name for name, _ in used))
 
 

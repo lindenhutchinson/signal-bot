@@ -5,6 +5,7 @@ returned by :func:`default_tools`. Nothing else needs wiring.
 """
 
 from signal_chatbot.botname import BotName
+from signal_chatbot.state.cooldowns import CooldownStore
 from signal_chatbot.state.directives import DirectiveStore
 from signal_chatbot.state.flags import FlagRegistry
 from signal_chatbot.state.profiles import ProfileStore
@@ -27,8 +28,10 @@ def default_tools(
     flags: FlagRegistry,
     reactions: ReactionSender,
     wikipedia: WikipediaService,
+    cooldowns: CooldownStore,
     *,
     wikipedia_max_section_chars: int,
+    set_name_cooldown_ms: int,
     web_search: Tool | None = None,
 ) -> list[Tool]:
     """The tools registered by default at startup.
@@ -36,12 +39,13 @@ def default_tools(
     ``name`` is the bot's name handle: a :class:`ProfileNameSetter` for ``set_name``
     and a :class:`NameSource` for the authoring/takeover tools (one ``BotName``
     satisfies both). ``flags`` backs the listen and (secret) takeover tools;
-    ``reactions`` backs emoji reactions. ``web_search`` is included only when
-    configured (a Tavily key is set); otherwise the bot simply lacks that ability.
+    ``reactions`` backs emoji reactions; ``cooldowns`` rate-limits ``set_name``.
+    ``web_search`` is included only when configured (a Tavily key is set); otherwise
+    the bot simply lacks that ability.
     """
     tools: list[Tool] = [
         CurrentTime(),
-        SetName(name),
+        SetName(name, cooldowns, cooldown_ms=set_name_cooldown_ms),
         AddRule(directives, name),
         AddLore(directives, name),
         RememberAboutUser(profiles),

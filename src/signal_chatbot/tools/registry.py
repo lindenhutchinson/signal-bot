@@ -55,6 +55,9 @@ class ToolRegistry:
         if tool is None:
             log.warning("tool.unknown", name=name)
             return ToolOutcome(result=f"Error: unknown tool {name!r}.")
+        # Every tool call passes through here — log it (name + the args the model sent) so
+        # what the bot actually does (searches, rules it sets, renames) is visible in the logs.
+        log.info("tool.dispatch", name=name, args=arguments)
         try:
             args = tool.Args.model_validate(arguments)
         except ValidationError as exc:
