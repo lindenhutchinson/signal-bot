@@ -250,6 +250,28 @@ async def test_final_answer_alongside_info_tool_is_terminal() -> None:
     assert len(client.calls) == 1
 
 
+async def test_action_tool_called_with_final_answer_still_runs() -> None:
+    # The model emits an ACTION tool (announce — stands in for add_rule/set_name) AND
+    # final_answer in ONE completion. The action must still run and its announcement ride
+    # out — not be silently dropped while the message claims it happened.
+    both = _completion(
+        _message(
+            tool_calls=[
+                _tool_call("a1", "announce", {"text": "a rule"}),
+                _tool_call("f1", FINAL_ANSWER_NAME, {"messages": ["done"]}),
+            ]
+        )
+    )
+    client = FakeClient([both])
+    convo = Conversation(client, ToolRegistry([Announcer()]), max_iterations=3)
+
+    reply = await convo.respond([{"role": "user", "content": "x"}], CTX)
+
+    assert reply.message == "done"
+    assert reply.announcements == ["📢 a rule"]
+    assert len(client.calls) == 1  # still terminal — no extra completion
+
+
 def test_strip_tool_markup_removes_leaked_dsml() -> None:
     assert _strip_tool_markup(_DSML) == ""
     assert _strip_tool_markup("Here's the answer." + _DSML) == "Here's the answer."

@@ -13,6 +13,8 @@ from signal_chatbot.llm.control import (
     _FINAL_ANSWER_DEF,
     _KILL_REVELATION,
     ATTEMPT_KILL_NAME,
+    CONFIRM_KILL_NAME,
+    FINAL_ANSWER_NAME,
     _called,
     _confirm_kill_args,
     _final_answer_args,
@@ -109,6 +111,11 @@ class Conversation:
 
             final = _final_answer_args(choice)
             if final is not None:
+                # The model often calls an action tool (add_rule, set_name, send_reaction…)
+                # in the SAME completion as final_answer. Run those before delivering, so the
+                # side effect lands and its announcement rides out — otherwise the bot CLAIMS
+                # it acted while nothing happened.
+                await self._run_coexecuted_tools(choice, ctx, used, announcements)
                 return self._deliver(final, used, announcements, attempted)
 
             if not choice.tool_calls:
@@ -216,6 +223,31 @@ class Conversation:
             if not self._tools.is_hidden(name):
                 used.append((name, _parse_args(call.function.arguments)))
             working.append(await self._run_tool(call, ctx, announcements))
+
+    async def _run_coexecuted_tools(
+        self,
+        choice: Any,
+        ctx: ToolContext,
+        used: list[tuple[str, dict]],
+        announcements: list[str],
+    ) -> None:
+        """Run any non-control tools called in the SAME completion as final_answer.
+
+        The model routinely emits an action tool (add_rule, add_lore, set_name,
+        send_reaction, …) alongside final_answer in one completion. Without this, the
+        final_answer short-circuit returns before they run, so the bot claims it acted
+        while the side effect — and its public announcement — never happens. We run them
+        here, accumulating announcements (and the footer's ``used`` entries) onto the
+        reply. The control tools (final_answer and the kill tools) are handled elsewhere
+        and skipped; hidden tools run but stay out of the public footer.
+        """
+        for call in choice.tool_calls or []:
+            name = call.function.name
+            if name in (FINAL_ANSWER_NAME, ATTEMPT_KILL_NAME, CONFIRM_KILL_NAME):
+                continue
+            if not self._tools.is_hidden(name):
+                used.append((name, _parse_args(call.function.arguments)))
+            await self._run_tool(call, ctx, announcements)
 
     @staticmethod
     def _log_raw_output(completion: Any, content: str, *, retried: bool) -> None:
