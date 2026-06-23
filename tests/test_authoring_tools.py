@@ -79,6 +79,43 @@ async def test_empty_lore_is_rejected_without_writing_or_announcing(directives) 
     assert "error" in outcome.result.lower()
 
 
+async def test_duplicate_rule_is_not_stored_again_or_announced(directives) -> None:
+    tool = AddRule(directives, FakeName("Greg"))
+
+    await tool.run(AddRule.Args(text="no puns"), CTX)
+    outcome = await tool.run(AddRule.Args(text="  no puns  "), CTX)
+
+    stored = (await directives.directives("g1")).rules
+    assert len(stored) == 1
+    assert outcome.announcements == []
+    assert "already" in outcome.result.lower()
+
+
+async def test_duplicate_lore_is_not_stored_again_or_announced(directives) -> None:
+    tool = AddLore(directives, FakeName("Greg"))
+
+    await tool.run(AddLore.Args(text="Dave fears geese"), CTX)
+    outcome = await tool.run(AddLore.Args(text="Dave fears geese"), CTX)
+
+    stored = (await directives.directives("g1")).lore
+    assert len(stored) == 1
+    assert outcome.announcements == []
+    assert "already" in outcome.result.lower()
+
+
+async def test_same_text_different_kind_is_not_treated_as_duplicate(directives) -> None:
+    rule = AddRule(directives, FakeName("Greg"))
+    lore = AddLore(directives, FakeName("Greg"))
+
+    await rule.run(AddRule.Args(text="Melbourne wins"), CTX)
+    outcome = await lore.run(AddLore.Args(text="Melbourne wins"), CTX)
+
+    sets = await directives.directives("g1")
+    assert len(sets.rules) == 1
+    assert len(sets.lore) == 1
+    assert outcome.announcements == ['📜 Greg added lore: "Melbourne wins"']
+
+
 def test_tool_names_and_definitions() -> None:
     assert AddRule.name == "add_rule"
     assert AddLore.name == "add_lore"

@@ -46,7 +46,7 @@ class _AddDirective(Tool):
         text = args.text.strip()
         if not text:
             return ToolOutcome(result=f"Error: {self._kind} text cannot be empty.")
-        await self._directives.add_directive(
+        added = await self._directives.add_directive(
             ctx.group_id,
             kind=self._kind,
             author_name=self._name.current,
@@ -54,6 +54,10 @@ class _AddDirective(Tool):
             text=text,
             created_at=ctx.timestamp,
         )
+        if not added:
+            # Already in effect — no duplicate row, no public re-announcement. Tell the
+            # model so it stops re-stating the same directive turn after turn.
+            return ToolOutcome(result=f"That {self._kind} is already in effect — no change made.")
         announcement = self._announcement.format(name=self._name.current, text=text)
         return ToolOutcome(result=f"Done — added that {self._kind}.", announcements=[announcement])
 

@@ -61,14 +61,27 @@ class DirectiveStore:
         author_number: str,
         text: str,
         created_at: int,
-    ) -> None:
-        """Append a directive of ``kind`` (rule/lore) for a group."""
+    ) -> bool:
+        """Append a directive of ``kind`` (rule/lore) for a group, idempotently.
+
+        Returns ``True`` if a new row was written, ``False`` if a directive of the same
+        ``kind`` and ``text`` already exists for the group — in which case nothing is
+        inserted. This keeps the bot's self-authoring loop from piling up duplicate
+        rules/lore (and re-announcing them) when it re-states the same directive.
+        """
+        cursor = await self._conn.execute(
+            "SELECT 1 FROM directives WHERE group_id = ? AND kind = ? AND text = ? LIMIT 1",
+            (group_id, kind, text),
+        )
+        if await cursor.fetchone() is not None:
+            return False
         await self._conn.execute(
             "INSERT INTO directives (group_id, kind, author_name, author_number, text, created_at)"
             " VALUES (?, ?, ?, ?, ?, ?)",
             (group_id, kind, author_name, author_number, text, created_at),
         )
         await self._conn.commit()
+        return True
 
     async def directives(self, group_id: str) -> DirectiveSet:
         """Return all directives for a group, bucketed by kind, oldest-first.
