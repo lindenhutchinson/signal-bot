@@ -68,4 +68,14 @@ class ToolRegistry:
         except Exception as exc:  # noqa: BLE001 - surface failure to the model, don't crash
             log.warning("tool.failed", name=name, error=str(exc))
             return ToolOutcome(result=f"Error running {name!r}: {exc}")
-        return outcome if isinstance(outcome, ToolOutcome) else ToolOutcome(result=outcome)
+        outcome = outcome if isinstance(outcome, ToolOutcome) else ToolOutcome(result=outcome)
+        # Log the OUTCOME, not just the call: the result text shows whether an action landed
+        # ("Done — added…") or was a no-op ("…already in effect"), and announced= shows whether
+        # it produced a public announcement. This is how we tell duplicates from real changes.
+        log.info(
+            "tool.done",
+            name=name,
+            result=outcome.result[:160],
+            announced=len(outcome.announcements),
+        )
+        return outcome

@@ -426,6 +426,13 @@ class Bot:
 
         # Tool-produced announcements are public, sent as their own messages AFTER the
         # main reply, and (like the footer) kept OUT of history so the model can't fake them.
+        if reply.messages or reply.announcements:
+            log.info(
+                "bot.reply_sent",
+                group=group_id,
+                bubbles=len(bubbles),
+                announcements=len(reply.announcements),
+            )
         for announcement in reply.announcements:
             await self._signal.send(OutgoingMessage(group_id=group_id, text=announcement))
 
